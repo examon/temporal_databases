@@ -1,16 +1,18 @@
-# Login
+# Create db, user and grant admin access
+``` bash
 sudo -s
-# password for root...
-
-# switch to postgres
 su - postgres
-
 createdb testdb
 psql -s testdb
+```
 
+# In psql shell
+``` sql
 create user testuser password 'test';
 grant all privileges on database testdb to testuser;
+```
 
-
-# get out of root and login
+# Get out of root and login as a testuser
+``` bash
 psql -d testdb -U testuser
+```
