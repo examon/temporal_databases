@@ -15,7 +15,10 @@ Requirements:
 TODO:
 - functions for creating versioned tables
 - functions to drop table
+
 - functions for selecting ranges?
+    - select stuff from test_history where sys_perios is in range: tstzrange('0110-01-01', '0320-01-01', '[]')
+    select * from test_history where tstzrange('0110-01-01', '0320-01-01', '[]') @> sys_period;
 """
 
 
@@ -33,6 +36,16 @@ def init(dbname, user, password):
     cur = conn.cursor()
     assert(conn != None and cur != None)
 
+    try:
+        # Try to create temporal_tables extension
+        # You need user with superuser permissions
+        q = cur.execute("""create extension temporal_tables;""")
+    except psycopg2.ProgrammingError:
+        print("temporal_tables extension already created")
+    finally:
+        # Need to commit transaction
+        conn.commit()
+
 
 def create_table(name, *attributes, history=True):
     """ Usage: create_table("test", "name text", "age int")
@@ -45,7 +58,8 @@ def create_table(name, *attributes, history=True):
     if history:
         cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
         cur.execute("""create table {TABLE}_history (like {TABLE});""".format(TABLE=name))
-        #cur.execute("""create trigger versioning_trigger before insert or update or delete on {TABLE} for each row execute procedure versioning('sys_period', '{TABLE}_history', true);""".format(TABLE=name))
+        # this works only if the user has superuser permissions
+        cur.execute("""create trigger versioning_trigger before insert or update or delete on {TABLE} for each row execute procedure versioning('sys_period', '{TABLE}_history', true);""".format(TABLE=name))
     conn.commit()
 
 
@@ -54,9 +68,10 @@ def select_all_from(table):
     return cur.fetchall()
 
 
-def insert_history(table, name, department, salary, time_start, time_end):
-    insert = """insert into {TABLE} values('{NAME}', '{DEPARTMENT}', {SALARY}, tstzrange('{START}', '{END}'));""".format(
-        TABLE=table, NAME=name, DEPARTMENT=department, SALARY=salary, START=time_start, END=time_end)
+def insert_history(table, name, time_start, time_end):
+    # TODO: generalize this
+    insert = """insert into {TABLE} values('{NAME}', tstzrange('{START}', '{END}'));""".format(
+        TABLE=table, NAME=name, START=time_start, END=time_end)
     cur.execute(insert)
     conn.commit()
 
