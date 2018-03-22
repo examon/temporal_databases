@@ -47,19 +47,32 @@ def init(dbname, user, password):
         conn.commit()
 
 
-def create_table(name, *attributes, history=True):
-    """ Usage: create_table("test", "name text", "age int")
+def execute_from_file(file_name):
+    """ Executes sql code from given file.
+    """
+    f = open(file_name)
+    sql_code = f.read()
+    cur.execute(sql_code)
+    conn.commit()
 
-    history: True = creates history table and enables versioning
+
+def create_table(name, *attributes, history=True):
+    """ Usage:
+
+    create_table("test", "name text", "age int")
     """
     attrs = ','.join(attributes)
     cur.execute("""create table {NAME} ({ATTRIBUTES});""".format(NAME=name, ATTRIBUTES=attrs))
+    conn.commit()
 
-    if history:
-        cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
-        cur.execute("""create table {TABLE}_history (like {TABLE});""".format(TABLE=name))
-        # this works only if the user has superuser permissions
-        cur.execute("""create trigger versioning_trigger before insert or update or delete on {TABLE} for each row execute procedure versioning('sys_period', '{TABLE}_history', true);""".format(TABLE=name))
+
+def create_history_table(name):
+    """ Creates history table for table @name
+    """
+    cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
+    cur.execute("""create table {TABLE}_history (like {TABLE});""".format(TABLE=name))
+    # this works only if the user has superuser permissions
+    cur.execute("""create trigger versioning_trigger before insert or update or delete on {TABLE} for each row execute procedure versioning('sys_period', '{TABLE}_history', true);""".format(TABLE=name))
     conn.commit()
 
 
@@ -85,8 +98,9 @@ def clear_table(table):
     cur.execute("""delete from {TABLE};""".format(TABLE=table))
 
 
-def drop_table(table):
-    cur.execute("""drop table {TABLE};""".format(TABLE=table))
+def drop_table(table, cascade=False):
+    c = "cascade" if cascade else ''
+    cur.execute("""drop table {TABLE} {CASCADE};""".format(TABLE=table, CASCADE=c))
     conn.commit()
 
 
@@ -97,7 +111,7 @@ def get_all_user_tables(user):
 
 def drop_all_user_tables(user):
     for table in get_all_user_tables(user):
-        drop_table(table[0])
+        drop_table(table[0], cascade=True)
 
 
 def get_random_string(min_length=5, max_length=15):
