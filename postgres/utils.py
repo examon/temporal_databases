@@ -13,9 +13,6 @@ Requirements:
 - psycopg2
 
 TODO:
-- functions for creating versioned tables
-- functions to drop table
-
 - functions for selecting ranges?
     - select stuff from test_history where sys_perios is in range: tstzrange('0110-01-01', '0320-01-01', '[]')
     select * from test_history where tstzrange('0110-01-01', '0320-01-01', '[]') @> sys_period;
@@ -47,6 +44,11 @@ def init(dbname, user, password):
         conn.commit()
 
 
+def execute(sql):
+    cur.execute(sql)
+    conn.commit()
+
+
 def execute_from_file(file_name):
     """ Executes sql code from given file.
     """
@@ -63,13 +65,19 @@ def create_table(name, *attributes, history=True):
     """
     attrs = ','.join(attributes)
     cur.execute("""create table {NAME} ({ATTRIBUTES});""".format(NAME=name, ATTRIBUTES=attrs))
+    if history:
+        cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
+    conn.commit()
+
+
+def table_attach_history(name):
+    cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
     conn.commit()
 
 
 def create_history_table(name):
     """ Creates history table for table @name
     """
-    cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
     cur.execute("""create table {TABLE}_history (like {TABLE});""".format(TABLE=name))
     # this works only if the user has superuser permissions
     cur.execute("""create trigger versioning_trigger before insert or update or delete on {TABLE} for each row execute procedure versioning('sys_period', '{TABLE}_history', true);""".format(TABLE=name))
@@ -79,14 +87,6 @@ def create_history_table(name):
 def select_all_from(table):
     cur.execute("""select * from {TABLE};""".format(TABLE=table))
     return cur.fetchall()
-
-
-def insert_history(table, name, time_start, time_end):
-    # TODO: generalize this
-    insert = """insert into {TABLE} values('{NAME}', tstzrange('{START}', '{END}'));""".format(
-        TABLE=table, NAME=name, START=time_start, END=time_end)
-    cur.execute(insert)
-    conn.commit()
 
 
 def count_rows(table):
