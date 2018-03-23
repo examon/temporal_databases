@@ -128,6 +128,14 @@ def get_random_number(min_value=0, max_value=100000):
         print(min_value, max_value)
 
 
+def get_random_boolean():
+    res = random.choice(range(2))
+    if res == 0:
+        return "false"
+    else:
+        return "true"
+
+
 def get_random_tstzrange(min_start_year=100, max_end_year=2018, step=1):
     """ 'year-month-day'
     """
