@@ -70,6 +70,17 @@ def create_table(name, *attributes, history=True):
     conn.commit()
 
 
+def set_db_time(hour, day, month, year):
+    cur.execute("""SELECT set_system_time('{YEAR}-{MONTH}-{DAY} {HOUR}:0');""".format(
+        YEAR=year, MONTH=month, DAY=day, HOUR=hour))
+    conn.commit()
+
+
+def reset_db_time():
+    cur.execute("""SELECT set_system_time(NULL);""")
+    conn.commit()
+
+
 def table_attach_history(name):
     cur.execute("""alter table {TABLE} add column sys_period tstzrange NOT NULL;""".format(TABLE=name))
     conn.commit()
@@ -150,4 +161,5 @@ def get_random_tstzrange(min_start_year=100, max_end_year=2018, step=1):
     end = datetime.datetime(e_year, e_month, e_day)
     start_str = '{:%Y-%m-%d}'.format(start)
     end_str = '{:%Y-%m-%d}'.format(end)
-    return (start_str, end_str)
+    return """tstzrange('{START}', '{END}')""".format(START=start_str, END=end_str)
+    #return (start_str, end_str)
