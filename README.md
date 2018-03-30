@@ -38,6 +38,8 @@ su - postgres
 createdb new_testdb
 ```
 
-Get out of the root shell.
+Get out of the root shell and type:
 
+``` bash
 psql -U testuser new_testdb < testdb.dump
+```
