@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS product
 CREATE TABLE IF NOT EXISTS category_product
 (
          category_id integer REFERENCES category (id),
-         product_id integer REFERENCES product (id)
+         product_id integer REFERENCES product (id),
+         PRIMARY KEY (category_id, product_id)
 );
 
 CREATE TABLE IF NOT EXISTS customer
