@@ -20,7 +20,7 @@ This generates data without and with history:
 ```
 cd postgres
 python generate.py
-python generate.py hostory
+python generate.py history
 ```
 
 
