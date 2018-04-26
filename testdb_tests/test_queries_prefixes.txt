@@ -1,0 +1,7 @@
+test_queries prefixy:
+
+t.. aplikovatelne na testdb aj testdb_history
+th.. aplikovatelne na testdb_history
+..s_ selecty
+..sh_ selecty s historiou
+..u_ updaty

@@ -1,0 +1,14 @@
+/* selects inactive customers and interval during which a customer is inactive */
+select cu.id, cu.name, cu.email, cu.password, cu.active, coalesce(icu.sys_period, cu.sys_period) as inactive_period
+from customer cu left join
+(
+select cwh2.id, tstzrange(max(lower(cwh2.sys_period)), null) as sys_period
+from customers_with_history cwh1, 
+customers_with_history cwh2 
+where cwh1.id = cwh2.id and cwh1.active = true and cwh2.active = false 
+and upper(cwh1.sys_period) = lower(cwh2.sys_period)
+
+group by cwh2.id
+order by cwh2.id) icu on icu.id = cu.id
+where cu.active = false
+order by inactive_period, cu.id;

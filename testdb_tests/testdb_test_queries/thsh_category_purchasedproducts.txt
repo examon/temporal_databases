@@ -1,0 +1,15 @@
+/* selects popularity of product categories */
+select ca.id as category_id, ca.name as category_name, count(pupr.id) as purchased_product_count, COALESCE(sum(pupr.cost), 0) as total_cost 
+from category ca
+left join category_product cp on ca.id = cp.category_id 
+left join 
+(select pr.* 
+from purchase pu, 
+LATERAL(
+select *
+from products_with_history prh 
+where pu.product_id = prh.id and prh.sys_period @> pu.date_time::timestamptz
+) pr) pupr on cp.product_id = pupr.id 
+
+group by ca.id, ca.name
+order by purchased_product_count desc, total_cost desc;
