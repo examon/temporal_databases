@@ -12,7 +12,7 @@ PGPASSWORD=test
 # prompt timeout
 timeout=5
 # dirs
-home="/home/lkotol/Documents/fi/temporal_databases/testdb_tests"
+home="$HOME/Documents/temporal_databases/testdb_tests"
 inputdir="$home/testdb_test_queries"
 outputdir="$home/testdb_test_results"
 
@@ -87,6 +87,34 @@ query=`expr "$input" : '.*\(update[ ]*[a-zA-Z_]*\)'`
 itr=$(($itr%$itrs +1))
 done
 fi
+
+echo
+read -t $timeout -r -n 1 -p "${1:-Run deletes?} [y/n]: " prompt
+if [[ $prompt = "y" || $prompt = "Y" || $prompt = "" ]]; then
+echo $'\n'deletes on $database and $database_hist
+deletein="$inputdir/tu_deletes.txt"
+> $deletein
+chmod a+w $deletein
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select * from generate_deletes($itrs)) TO '$deletein' (format text)"
+
+
+
+itr=1
+sql="$(<"$deletein")"
+sql=${sql//\'/\'\'}
+IFS='\;'
+for input in $sql
+do
+sqlexec="'$input;'"
+query=`expr "$input" : '.*\(delete[ ]*[a-zA-Z_]*\)'`
+
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'delete' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'delete' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
+
+itr=$(($itr%$itrs +1))
+done
+fi
+
 
 echo
 echo $'\n'results in $output

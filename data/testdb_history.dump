@@ -297,6 +297,24 @@ CREATE TABLE public.category_history (
 ALTER TABLE public.category_history OWNER TO testuser;
 
 --
+-- Name: categories_with_history; Type: VIEW; Schema: public; Owner: lukas
+--
+
+CREATE VIEW public.categories_with_history AS
+ SELECT category.id,
+    category.name,
+    category.sys_period
+   FROM public.category
+UNION ALL
+ SELECT category_history.id,
+    category_history.name,
+    category_history.sys_period
+   FROM public.category_history;
+
+
+ALTER TABLE public.categories_with_history OWNER TO lukas;
+
+--
 -- Name: category_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
@@ -384,6 +402,30 @@ ALTER SEQUENCE public.customer_id_seq OWNED BY public.customer.id;
 
 
 --
+-- Name: customers_with_history; Type: VIEW; Schema: public; Owner: lukas
+--
+
+CREATE VIEW public.customers_with_history AS
+ SELECT customer.id,
+    customer.name,
+    customer.email,
+    customer.password,
+    customer.active,
+    customer.sys_period
+   FROM public.customer
+UNION ALL
+ SELECT customer_history.id,
+    customer_history.name,
+    customer_history.email,
+    customer_history.password,
+    customer_history.active,
+    customer_history.sys_period
+   FROM public.customer_history;
+
+
+ALTER TABLE public.customers_with_history OWNER TO lukas;
+
+--
 -- Name: product; Type: TABLE; Schema: public; Owner: testuser
 --
 
@@ -433,6 +475,28 @@ ALTER TABLE public.product_id_seq OWNER TO testuser;
 
 ALTER SEQUENCE public.product_id_seq OWNED BY public.product.id;
 
+
+--
+-- Name: products_with_history; Type: VIEW; Schema: public; Owner: lukas
+--
+
+CREATE VIEW public.products_with_history AS
+ SELECT product.id,
+    product.name,
+    product.cost,
+    product.amount,
+    product.sys_period
+   FROM public.product
+UNION ALL
+ SELECT product_history.id,
+    product_history.name,
+    product_history.cost,
+    product_history.amount,
+    product_history.sys_period
+   FROM public.product_history;
+
+
+ALTER TABLE public.products_with_history OWNER TO lukas;
 
 --
 -- Name: purchase; Type: TABLE; Schema: public; Owner: testuser
@@ -534,7 +598,6 @@ COPY public.category (id, name, sys_period) FROM stdin;
 45	ckica	["1990-08-02 20:00:00+02",)
 74	lqoaayv	["1990-05-17 21:00:00+02",)
 42	qkmloc	["1990-08-15 07:00:00+02",)
-117	juvwowbyw	["1990-11-01 10:00:00+01",)
 77	tjuirf	["1990-02-05 08:00:00+01",)
 123	jmlac	["1990-02-13 11:00:00+01",)
 103	babchaoswocatvy	["1990-10-07 18:00:00+01",)
@@ -926,7 +989,6 @@ COPY public.category (id, name, sys_period) FROM stdin;
 468	xijmho	["1990-06-15 07:00:00+02",)
 480	vqxrlsevewakc	["1990-06-15 08:00:00+02",)
 481	wtjonscid	["1990-06-15 11:00:00+02",)
-444	rgpclwoepilwqef	["1990-08-12 16:00:00+02",)
 484	olnciucoktq	["1990-06-16 01:00:00+02",)
 485	uvwtkpkubork	["1990-06-16 02:00:00+02",)
 421	lvxjbzjuzlc	["1990-06-16 06:00:00+02",)
@@ -1777,6 +1839,8 @@ COPY public.category (id, name, sys_period) FROM stdin;
 1273	giuana	["1991-03-27 22:00:00+01",)
 810	ehqmysgkfrgexv	["1991-03-28 08:00:00+01",)
 1274	wgueqq	["1991-03-28 11:00:00+01",)
+444	dagncpx	["2018-04-26 19:49:36.148908+02",)
+117	wfuymrwqvogqx	["2018-04-26 19:49:36.763915+02",)
 \.
 
 
@@ -3057,6 +3121,8 @@ COPY public.category_history (id, name, sys_period) FROM stdin;
 1134	rvjaxdhusdojtye	["1991-02-11 07:00:00+01","1991-03-27 23:00:00+01")
 1156	fpkkeurxxdprkrr	["1991-02-16 16:00:00+01","1991-03-28 05:00:00+01")
 810	oufrzhs	["1990-10-13 11:00:00+01","1991-03-28 08:00:00+01")
+444	rgpclwoepilwqef	["1990-08-12 16:00:00+02","2018-04-26 19:49:36.148908+02")
+117	juvwowbyw	["1990-11-01 10:00:00+01","2018-04-26 19:49:36.763915+02")
 \.
 
 
@@ -4725,7 +4791,6 @@ COPY public.customer (id, name, email, password, active, sys_period) FROM stdin;
 453	jwcybfjwspuefbm	tfdofyetqedp	vstxzue	t	["1990-07-04 01:00:00+02",)
 462	bxqygk	hjwkoqmo	pryoxqmocy	t	["1990-06-08 15:00:00+02",)
 463	kloggqhnmmrmab	hpvku	pnurpdanwxwnt	f	["1990-06-08 17:00:00+02",)
-467	mnbwuji	vnrkcedjcq	kmcwjhugywzbjrs	f	["1990-06-10 14:00:00+02",)
 469	ijeep	vgbircqkhwopor	egcbuzmh	f	["1990-06-10 23:00:00+02",)
 470	wxyjheayclgaa	yzyncslteup	uqejomoi	f	["1990-06-11 00:00:00+02",)
 456	saeej	eifuhzbyq	sbzpfgioqmbvf	f	["1990-07-20 04:00:00+02",)
@@ -4992,7 +5057,6 @@ COPY public.customer (id, name, email, password, active, sys_period) FROM stdin;
 702	kkltmlnexwyogzv	vxvpiugryu	zpgwpykygfes	t	["1990-08-26 20:00:00+02",)
 703	ayrljna	zgkshai	cknmbkroob	f	["1990-08-27 07:00:00+02",)
 705	cpnuz	bpzvshduu	nnkpzpbv	f	["1990-08-28 04:00:00+02",)
-707	qmynahjm	xnhdopkz	ktzbngbxbytglmv	t	["1990-08-28 21:00:00+02",)
 709	xvfwbqyjyyztk	cqhjyfdhk	jccgckgip	t	["1990-09-01 04:00:00+02",)
 711	qovlflyjvrz	qgvhwihwa	oidvod	t	["1990-09-01 17:00:00+02",)
 688	qwnyhu	ttdbojqxmi	dtnvjtooe	t	["1990-11-07 07:00:00+01",)
@@ -5628,6 +5692,8 @@ COPY public.customer (id, name, email, password, active, sys_period) FROM stdin;
 1306	wtgfshkld	byoetwaffslyt	ttwntz	f	["1991-03-27 19:00:00+01",)
 1307	niomxyfbbrqatdz	dipfzjmenzepolo	mtbevlaf	t	["1991-03-27 20:00:00+01",)
 1308	fawotbzwxn	fckobuodsigh	fenkjygal	f	["1991-03-28 02:00:00+01",)
+707	qmynahjm	skdpryunpjdqw	ktzbngbxbytglmv	t	["2018-04-26 19:49:34.047116+02",)
+467	mnbwuji	lcjkohhecgwyeeqqujb	kmcwjhugywzbjrs	f	["2018-04-26 19:49:34.653033+02",)
 \.
 
 
@@ -6921,6 +6987,8 @@ COPY public.customer_history (id, name, email, password, active, sys_period) FRO
 667	kqejpjqiobgb	vgfzcnljbtqe	lcdiy	t	["1990-08-16 02:00:00+02","1991-03-28 00:00:00+01")
 399	qwacvnurl	gzzhmolwfppv	eugqfaejieggduk	t	["1991-01-12 12:00:00+01","1991-03-28 01:00:00+01")
 388	irxxonddtbkdxtt	fbigyx	ovvrcmdxgxvkewf	f	["1990-05-10 05:00:00+02","1991-03-28 03:00:00+01")
+707	qmynahjm	xnhdopkz	ktzbngbxbytglmv	t	["1990-08-28 21:00:00+02","2018-04-26 19:49:34.047116+02")
+467	mnbwuji	vnrkcedjcq	kmcwjhugywzbjrs	f	["1990-06-10 14:00:00+02","2018-04-26 19:49:34.653033+02")
 \.
 
 
@@ -7473,7 +7541,6 @@ COPY public.product (id, name, cost, amount, sys_period) FROM stdin;
 526	vngimvd	510	1914	["1991-03-12 19:00:00+01",)
 460	wbvknsekq	538	3741	["1991-01-25 07:00:00+01",)
 504	fxttwffwab	426	7463	["1991-03-28 14:00:00+01",)
-549	gvkepusqfppqiz	772	9094	["1991-02-12 20:00:00+01",)
 508	ezwoun	719	2882	["1991-03-20 09:00:00+01",)
 509	unqkhwpdblfynob	955	1098	["1991-02-22 15:00:00+01",)
 534	rcgrz	255	4669	["1991-03-01 11:00:00+01",)
@@ -7774,7 +7841,6 @@ COPY public.product (id, name, cost, amount, sys_period) FROM stdin;
 865	ogqjrybhoib	902	4521	["1990-11-20 01:00:00+01",)
 104	rcrdfqisritmpvh	5	5761	["1990-11-20 13:00:00+01",)
 866	synnozjqhptcrzy	373	9740	["1990-11-20 14:00:00+01",)
-867	pznlqpkfdl	736	233	["1990-11-20 19:00:00+01",)
 868	tvujxqgehwfu	11	9931	["1990-11-20 21:00:00+01",)
 869	odrsoney	867	8791	["1990-11-21 02:00:00+01",)
 870	ieikahinldqe	928	9837	["1990-11-21 08:00:00+01",)
@@ -8181,6 +8247,8 @@ COPY public.product (id, name, cost, amount, sys_period) FROM stdin;
 1086	awwemsqisvlpqo	936	5487	["1991-03-28 09:00:00+01",)
 1244	ebjmp	422	4201	["1991-03-28 10:00:00+01",)
 1245	okuzoyi	158	6180	["1991-03-28 13:00:00+01",)
+549	kqfvtnyttmvjkmgphfcy	772	9094	["2018-04-26 19:49:37.380982+02",)
+867	su	736	233	["2018-04-26 19:49:37.990169+02",)
 \.
 
 
@@ -9390,6 +9458,8 @@ COPY public.product_history (id, name, cost, amount, sys_period) FROM stdin;
 1086	awwemsqisvlpqo	202	5487	["1991-02-09 13:00:00+01","1991-03-28 09:00:00+01")
 504	fxttwffwab	25	7463	["1990-07-13 01:00:00+02","1991-03-28 14:00:00+01")
 49	bvgdvjhvn	310	5467	["1990-06-23 07:00:00+02","1991-03-28 15:00:00+01")
+549	gvkepusqfppqiz	772	9094	["1991-02-12 20:00:00+01","2018-04-26 19:49:37.380982+02")
+867	pznlqpkfdl	736	233	["1990-11-20 19:00:00+01","2018-04-26 19:49:37.990169+02")
 \.
 
 
