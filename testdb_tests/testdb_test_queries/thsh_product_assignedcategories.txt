@@ -1,0 +1,12 @@
+/* selects products with least amonut of categories assigned */
+select pr.id, pr.name, tstzrange(min(lower(prh.sys_period)), coalesce(cph.period, 'infinity')) as origin_to_most_recent, coalesce(cph.cur_cat, 0) as current_categories, coalesce(cph.total_cat, 0) as total_categories
+from product pr
+left join (
+select cph1.product_id, max(coalesce(upper(cph1.sys_period), 'infinity')) as period, count(coalesce(upper(cph1.sys_period), 'infinity') = 'infinity' or null) as cur_cat, count(*) as total_cat
+from category_product/*categories_products_with_history*/ cph1
+group by cph1.product_id
+) cph on pr.id = cph.product_id
+join products_with_history prh on pr.id = prh.id
+
+group by pr.id, pr.name, cph.period, current_categories, total_categories
+order by coalesce(cph.period, 'infinity'), current_categories, total_categories, pr.id;

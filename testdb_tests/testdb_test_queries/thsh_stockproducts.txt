@@ -1,0 +1,17 @@
+/* selects which products need to be restocked */
+with stock as (select 100 as min)
+
+select pr.id, pr.name, pr.cost, pr.amount, coalesce(ipr.sys_period, pr.sys_period) as defficient_period
+from product pr 
+left join (
+select prh2.id, tstzrange(max(lower(prh2.sys_period)), null) as sys_period
+from products_with_history prh1, 
+products_with_history prh2, stock 
+where prh1.id = prh2.id and prh1.amount > stock.min and prh2.amount <= stock.min 
+and upper(prh1.sys_period) = lower(prh2.sys_period)
+
+group by prh2.id
+order by prh2.id) ipr on ipr.id = pr.id, 
+stock
+where pr.amount <= stock.min
+order by pr.amount, defficient_period, pr.id;

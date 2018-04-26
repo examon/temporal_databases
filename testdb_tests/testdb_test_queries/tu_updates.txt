@@ -1,0 +1,1 @@
+update customer set name = 'vfdgzsqkehlheig' where id = 163;update purchase set date_time = '2012-04-28 10:42:01.348263' where id = 875;update category set name = 'gfslkfdj' where id = 356;update product set amount = '348' where id = 93;update category_product set product_id = '260' where category_id = 173;

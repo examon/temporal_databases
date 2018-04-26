@@ -1,0 +1,22 @@
+/* profit every month... */
+with dates as (
+select * 
+from generate_series('1990-01-01'::date, '2000-12-31'::date, '1 month') month
+), 
+purchased_products as (
+select pu.id as purchase_id, pu.date_time as purchase_date_time, pu.customer_id, pu.sys_period as purchase_sys_period,
+pr.id as product_id, pr.name as product_name, pr.cost, pr.amount, pr.sys_period as product_sys_period
+from purchase pu, 
+LATERAL(
+select *
+from products_with_history prh
+where pu.product_id = prh.id and prh.sys_period @> pu.date_time::timestamptz
+) pr
+order by pu.id
+)
+
+select month, count(pp.*), sum(coalesce(pp.cost, 0)) 
+from dates
+left join purchased_products pp on month = date_trunc('month', pp.purchase_date_time::date)
+group by month
+order by month;
