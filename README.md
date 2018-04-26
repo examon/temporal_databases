@@ -13,9 +13,27 @@ grant all privileges on database testdb to testuser;
 alter user testuser with superuser;
 ```
 
+# Generate database data
+
+This generates data without and with history:
+
+```
+cd postgres
+python generate.py
+python generate.py history
+```
+
+
 # Get out of root and login as a testuser
-``` bash
+
+To get into db without history:
+```
 psql -d testdb -U testuser
+```
+
+To get into db with history:
+```
+psql -d testdb_history -U testuser
 ```
 
 # Dump and Restore DB

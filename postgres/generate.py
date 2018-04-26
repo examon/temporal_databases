@@ -9,27 +9,9 @@ TODO:
 
 import utils
 import random
-
-DBNAME = "testdb"
-USER = "testuser"
-PASSWORD = "test"
-utils.init(DBNAME, USER, PASSWORD)
+import sys
 
 TIME = {"hour": 12, "minute": 0, "day": 1, "month": 1, "year": 1990}
-utils.set_db_time(hour=TIME["hour"], day=TIME["day"], month=TIME["month"], year=TIME["year"])
-
-DB_CHANGES = 10000
-
-## Create model and history tables
-utils.drop_all_user_tables(USER)
-utils.execute_from_file("model.sql")
-tables = utils.get_all_user_tables(USER)
-for t in tables:
-    table = t[0]
-    utils.table_attach_history(table)
-    utils.create_history_table(table)
-#print(utils.get_all_user_tables(USER))
-
 
 def advance_time(by_hour=1):
     TIME["hour"] += 1
@@ -44,8 +26,6 @@ def advance_time(by_hour=1):
                 TIME["year"] += 1
     utils.set_db_time(hour=TIME["hour"], day=TIME["day"], month=TIME["month"], year=TIME["year"])
 
-def get_db_time():
-    return """%d-%d-%d %d:%d""" % (TIME["year"], TIME["month"], TIME["day"], TIME["hour"], TIME["minute"])
 
 ################################################################################
 ## category                                                                   ##
@@ -156,6 +136,9 @@ def _get_pair_customer_product():
     return (purchase_customer_id, purchase_product_id)
 
 def insert_purchase():
+    def get_db_time():
+        return """%d-%d-%d %d:%d""" % (TIME["year"], TIME["month"], TIME["day"], TIME["hour"], TIME["minute"])
+
     found_good_pair = False
     while not found_good_pair:
         pair = _get_pair_customer_product()
@@ -186,28 +169,59 @@ def NOT_USED_update_purchase():
 ## GENERATION                                                                 ##
 ################################################################################
 
-## list of db modifications
-functions = [insert_category, update_category,
-             insert_product, update_product,
-             insert_customer, update_customer,
-             insert_category_product,
-             insert_purchase,
-             #insert_category_product, update_category_product,
-             #insert_purchase, update_purchase]
-             ]
+def create_testdb_history():
+    print(sys.argv)
+    IS_HISTORY = False
+    if len(sys.argv) == 2 and sys.argv[1] == "history":
+        IS_HISTORY = True
 
-## initial inserts
-def _init():
-    insert_category()
-    insert_product()
-    insert_customer()
-for _ in range(20):
-    _init()
+    if IS_HISTORY:
+        DBNAME = "testdb_history"
+    else:
+        DBNAME = "testdb"
 
-#insert_category_product()
-#insert_purchase()
+    USER = "testuser"
+    PASSWORD = "test"
+    utils.init(DBNAME, USER, PASSWORD)
 
-## db life simulation
-for _ in range(DB_CHANGES):
-    fcn = functions[utils.get_random_number(0, len(functions)-1)]
-    fcn()
+    TIME = {"hour": 12, "minute": 0, "day": 1, "month": 1, "year": 1990}
+    utils.set_db_time(hour=TIME["hour"], day=TIME["day"], month=TIME["month"], year=TIME["year"])
+
+    DB_CHANGES = 10000
+
+    ## Create model and history tables
+    utils.drop_all_user_tables(USER)
+    utils.execute_from_file("model.sql")
+    tables = utils.get_all_user_tables(USER)
+    for t in tables:
+        table = t[0]
+        if IS_HISTORY:
+            utils.table_attach_history(table)
+            utils.create_history_table(table)
+    if IS_HISTORY:
+        utils.drop_table("category_product_history")
+        utils.drop_table("purchase_history")
+    print(utils.get_all_user_tables(USER))
+
+
+    ## list of db modifications
+    functions = [insert_category, update_category,
+                insert_product, update_product,
+                insert_customer, update_customer,
+                insert_category_product,
+                insert_purchase]
+
+    ## initial inserts
+    def _init():
+        insert_category()
+        insert_product()
+        insert_customer()
+    for _ in range(20):
+        _init()
+
+    ## db life simulation
+    for _ in range(DB_CHANGES):
+        fcn = functions[utils.get_random_number(0, len(functions)-1)]
+        fcn()
+
+create_testdb_history()
