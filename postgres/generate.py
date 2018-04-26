@@ -201,8 +201,6 @@ def create_testdb_history():
     if IS_HISTORY:
         utils.drop_table("category_product_history")
         utils.drop_table("purchase_history")
-    print(utils.get_all_user_tables(USER))
-
 
     ## list of db modifications
     functions = [insert_category, update_category,
