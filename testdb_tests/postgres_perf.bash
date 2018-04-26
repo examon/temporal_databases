@@ -2,7 +2,7 @@
 
 echo Database testing
 # psql args
-POSTGRES_HOME="C:/Program Files/PostgreSQL/9.4"
+POSTGRES_HOME="/usr/bin/psql"
 server=localhost
 database=testdb
 database_hist=testdb_history
@@ -10,9 +10,9 @@ port=5432
 username=testuser
 PGPASSWORD=test
 # prompt timeout
-timeout=1
+timeout=5
 # dirs
-home="D:/School/School/_magister/projekt_db/testdb_tests"
+home="/home/lkotol/Documents/fi/temporal_databases/testdb_tests"
 inputdir="$home/testdb_test_queries"
 outputdir="$home/testdb_test_results"
 
@@ -40,8 +40,8 @@ sql="$(<"$input")"
 sql=${sql//\'/\'\'}
 for itr in $(seq $itrs)
 do
-"$POSTGRES_HOME/bin/psql.exe" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'select' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$sql')) TO STDOUT WITH CSV" >> $output
-"$POSTGRES_HOME/bin/psql.exe" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'select history' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$sql')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'select' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$sql')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'select history' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$sql')) TO STDOUT WITH CSV" >> $output
 done
 done
 fi
@@ -58,7 +58,7 @@ sql="$(<"$input")"
 sql=${sql//\'/\'\'}
 for itr in $(seq $itrs)
 do
-"$POSTGRES_HOME/bin/psql.exe" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'select history' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$sql')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'select history' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$sql')) TO STDOUT WITH CSV" >> $output
 done
 done
 fi
@@ -70,7 +70,7 @@ if [[ $prompt = "y" || $prompt = "Y" || $prompt = "" ]]; then
 echo $'\n'updates on $database and $database_hist
 updatein="$inputdir/tu_updates.txt"
 > $updatein
-"$POSTGRES_HOME/bin/psql.exe" -h $server -U $username -d $database -p $port -c "COPY (select * from generate_updates($itrs)) TO '$updatein' (format text)"
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select * from generate_updates($itrs)) TO '$updatein' (format text)"
 
 itr=1
 sql="$(<"$updatein")"
@@ -81,8 +81,8 @@ do
 sqlexec="'$input;'"
 query=`expr "$input" : '.*\(update[ ]*[a-zA-Z_]*\)'`
 
-"$POSTGRES_HOME/bin/psql.exe" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'update' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
-"$POSTGRES_HOME/bin/psql.exe" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'update' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'update' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'update' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
 
 itr=$(($itr%$itrs +1))
 done
