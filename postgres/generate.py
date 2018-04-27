@@ -113,12 +113,35 @@ def insert_category_product():
         CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
     advance_time()
 
-def NOT_USED_update_category_product():
+def delete_category_product():
+    # delete only sometimes
+    if utils.get_random_number(1, 5) != 1:
+        return
+    found_good_pair = False
+    while not found_good_pair:
+        category_num_ids = utils.count_rows("category")
+        _category_id = utils.get_random_number(1, category_num_ids)
+        product_num_ids = utils.count_rows("product")
+        _product_id = utils.get_random_number(1, product_num_ids)
+        pair = (_category_id, _product_id)
+        if pair in _category_product_pairs:
+            _category_product_pairs.remove(pair)
+            found_good_pair = True
+            break
+    if not found_good_pair:
+        return
+    category_product_category_id = pair[0]
+    category_product_product_id = pair[1]
+
+    utils.execute("""delete from category_product where category_id = {CATEGORY_PRODUCT_CATEGORY_ID} and product_id = {CATEGORY_PRODUCT_PRODUCT_ID};""".format(
+        CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
+    advance_time()
+
+def OLD_update_category_product():
     category_num_ids = utils.count_rows("category")
     product_num_ids = utils.count_rows("product")
     category_product_category_id = utils.get_random_number(1, category_num_ids)
     category_product_product_id = utils.get_random_number(1, product_num_ids)
-
     utils.execute("""update category_product set category_id = {CATEGORY_PRODUCT_CATEGORY_ID} where product_id = {CATEGORY_PRODUCT_PRODUCT_ID};""".format(
         CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
     advance_time()
@@ -155,7 +178,7 @@ def insert_purchase():
         DB_TIME=get_db_time(), PURCHASE_CUSTOMER_ID=purchase_customer_id, PURCHASE_PRODUCT_ID=purchase_product_id))
     advance_time()
 
-def NOT_USED_update_purchase():
+def update_purchase():
     customer_num_ids = utils.count_rows("customer")
     product_num_ids = utils.count_rows("product")
     purchase_customer_id = utils.get_random_number(1, customer_num_ids)
@@ -199,15 +222,19 @@ def create_testdb_history():
             utils.table_attach_history(table)
             utils.create_history_table(table)
     if IS_HISTORY:
-        utils.drop_table("category_product_history")
-        utils.drop_table("purchase_history")
+        #utils.drop_table("category_product_history")
+        #utils.drop_table("purchase_history")
+        pass
 
-    ## list of db modifications
+    ## list of database modification functions
     functions = [insert_category, update_category,
                 insert_product, update_product,
                 insert_customer, update_customer,
                 insert_category_product,
                 insert_purchase]
+    if IS_HISTORY:
+        functions.append(update_purchase)
+        functions.append(delete_category_product)
 
     ## initial inserts
     def _init():
@@ -220,6 +247,7 @@ def create_testdb_history():
     ## db life simulation
     for _ in range(DB_CHANGES):
         fcn = functions[utils.get_random_number(0, len(functions)-1)]
+        print(fcn.__name__)
         fcn()
 
 create_testdb_history()
