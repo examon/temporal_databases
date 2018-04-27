@@ -2,13 +2,14 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 9.5.10
--- Dumped by pg_dump version 9.5.10
+-- Dumped from database version 9.5.12
+-- Dumped by pg_dump version 9.5.12
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
 SET client_min_messages = warning;
 SET row_security = off;
@@ -41,7 +42,229 @@ CREATE EXTENSION IF NOT EXISTS temporal_tables WITH SCHEMA public;
 COMMENT ON EXTENSION temporal_tables IS 'temporal tables';
 
 
-SET search_path = public, pg_catalog;
+--
+-- Name: generate_inserts(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_inserts(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[];
+my_table text;
+sql text;
+
+begin
+with sub as (select table_name
+from information_schema.columns
+where table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+group by table_name
+)
+select array_agg(table_name::text) from sub into tables;
+
+sql:='';
+foreach my_table in array tables
+loop
+sql:=sql||generate_inserts(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_inserts(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_inserts(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_inserts(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+columns text[];
+
+begin
+with sub as (select column_name
+from information_schema.columns
+where table_name=my_table and column_name not like 'id' and column_name not like 'sys_period' and table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+)
+select array_agg(column_name::text) from sub into columns;
+
+sql:='';
+for i in 1..size
+loop
+sql:=sql||'insert into '||my_table||' ('||array_to_string(columns, ',')||') values ('||array_to_string((select array(select ''''||generate_value(my_table, unnest(columns))||'''')),',')||');';
+
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_inserts(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[];
+my_table text;
+sql text;
+
+begin
+with sub as (select table_name
+from information_schema.columns
+where table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+group by table_name
+)
+select array_agg(table_name::text) from sub into tables;
+
+sql:='';
+foreach my_table in array tables -- return table?
+loop
+sql:=sql||generate_updates(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+columns text[];
+
+begin
+with sub as (select column_name
+from information_schema.columns
+where table_schema='public' and table_name=my_table and column_name not like 'id' and column_name not like 'sys_period' and table_name not like '%history' and is_updatable='YES'
+)
+select array_agg(column_name::text) from sub into columns;
+
+return generate_updates(my_table, columns[ceil(random()*array_length(columns,1))], size, null);
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(text, text, integer, integer[]); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(my_table text, my_column text, size integer, my_ids integer[]) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+var text;
+ids text;
+id integer;
+idtxt text;
+
+begin
+
+if my_ids is null 
+then my_ids:= array(select round(random()*1000)::integer from generate_series(1,size));
+end if;
+ids:=array_to_string(my_ids, ',');
+size:=array_length(my_ids,1);
+idtxt:='id';
+sql:='';
+
+foreach id in array my_ids
+loop
+if my_table = 'category_product'
+then idtxt:='category_id = '||id||' and product_id';
+end if;
+
+var:=generate_value(my_table, my_column);
+sql:=sql||'update '||my_table||' set '||my_column||' = '''||var||''' where '||idtxt||' = '||id||';';
+
+--'from generate_series(1,'||size||') as generator) '||
+end loop; 
+
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(my_table text, my_column text, size integer, my_ids integer[]) OWNER TO lukas;
+
+--
+-- Name: generate_value(text, text); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_value(my_table text, my_column text) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+my_type text;
+begin
+select  /*case 
+when data_type='character varying' 
+then 'varchar('||character_maximum_length||')'
+when data_type='numeric' then 'numeric('||numeric_precision||','||numeric_scale||')'
+else*/ data_type
+--end
+from information_schema.columns
+where table_schema='public' and table_name=my_table and column_name=my_column and is_updatable='YES' into my_type;
+
+if (my_type like 'character varying') then return (select array_to_string(array(select chr((ascii('a')+round(random()*25))::integer) from generate_series(1,ceil(random()*20)::int)), ''));
+elsif (my_type = 'integer') then return round(random()*1000)::integer;
+elsif my_type = 'timestamp without time zone' then return current_timestamp::timestamp - random() * (current_timestamp - '1990-01-01 01:01:01'::timestamp);
+elsif my_type = 'boolean' then return random() > 0.5;
+else raise notice 'not supported';
+end if;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_value(my_table text, my_column text) OWNER TO lukas;
+
+--
+-- Name: measure_exec_time(character varying); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.measure_exec_time(sql_txt character varying, OUT "elapsed_time [ms]" real) RETURNS real
+    LANGUAGE plpgsql
+    AS $$ 
+declare
+t0 timestamptz;
+t1 timestamptz;
+
+begin
+CHECKPOINT; --DBCC DROPCLEANBUFFERS; DBCC FREEPROCCACHE; v sql 2016
+t0 := clock_timestamp();
+execute sql_txt;-- queries
+t1 := clock_timestamp();
+"elapsed_time [ms]" := 1000*(extract(epoch from t1)-extract(epoch from t0));
+end;
+
+$$;
+
+
+ALTER FUNCTION public.measure_exec_time(sql_txt character varying, OUT "elapsed_time [ms]" real) OWNER TO lukas;
 
 SET default_tablespace = '';
 
@@ -51,19 +274,19 @@ SET default_with_oids = false;
 -- Name: category; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE category (
+CREATE TABLE public.category (
     id integer NOT NULL,
     name character varying(100)
 );
 
 
-ALTER TABLE category OWNER TO testuser;
+ALTER TABLE public.category OWNER TO testuser;
 
 --
 -- Name: category_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE category_id_seq
+CREATE SEQUENCE public.category_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -71,32 +294,32 @@ CREATE SEQUENCE category_id_seq
     CACHE 1;
 
 
-ALTER TABLE category_id_seq OWNER TO testuser;
+ALTER TABLE public.category_id_seq OWNER TO testuser;
 
 --
 -- Name: category_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE category_id_seq OWNED BY category.id;
+ALTER SEQUENCE public.category_id_seq OWNED BY public.category.id;
 
 
 --
 -- Name: category_product; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE category_product (
+CREATE TABLE public.category_product (
     category_id integer NOT NULL,
     product_id integer NOT NULL
 );
 
 
-ALTER TABLE category_product OWNER TO testuser;
+ALTER TABLE public.category_product OWNER TO testuser;
 
 --
 -- Name: customer; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE customer (
+CREATE TABLE public.customer (
     id integer NOT NULL,
     name character varying(100),
     email character varying(100),
@@ -105,13 +328,13 @@ CREATE TABLE customer (
 );
 
 
-ALTER TABLE customer OWNER TO testuser;
+ALTER TABLE public.customer OWNER TO testuser;
 
 --
 -- Name: customer_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE customer_id_seq
+CREATE SEQUENCE public.customer_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -119,20 +342,20 @@ CREATE SEQUENCE customer_id_seq
     CACHE 1;
 
 
-ALTER TABLE customer_id_seq OWNER TO testuser;
+ALTER TABLE public.customer_id_seq OWNER TO testuser;
 
 --
 -- Name: customer_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE customer_id_seq OWNED BY customer.id;
+ALTER SEQUENCE public.customer_id_seq OWNED BY public.customer.id;
 
 
 --
 -- Name: product; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE product (
+CREATE TABLE public.product (
     id integer NOT NULL,
     name character varying(100),
     cost integer,
@@ -140,13 +363,13 @@ CREATE TABLE product (
 );
 
 
-ALTER TABLE product OWNER TO testuser;
+ALTER TABLE public.product OWNER TO testuser;
 
 --
 -- Name: product_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE product_id_seq
+CREATE SEQUENCE public.product_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -154,20 +377,20 @@ CREATE SEQUENCE product_id_seq
     CACHE 1;
 
 
-ALTER TABLE product_id_seq OWNER TO testuser;
+ALTER TABLE public.product_id_seq OWNER TO testuser;
 
 --
 -- Name: product_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE product_id_seq OWNED BY product.id;
+ALTER SEQUENCE public.product_id_seq OWNED BY public.product.id;
 
 
 --
 -- Name: purchase; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE purchase (
+CREATE TABLE public.purchase (
     id integer NOT NULL,
     date_time timestamp without time zone,
     customer_id integer,
@@ -175,13 +398,13 @@ CREATE TABLE purchase (
 );
 
 
-ALTER TABLE purchase OWNER TO testuser;
+ALTER TABLE public.purchase OWNER TO testuser;
 
 --
 -- Name: purchase_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE purchase_id_seq
+CREATE SEQUENCE public.purchase_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -189,48 +412,48 @@ CREATE SEQUENCE purchase_id_seq
     CACHE 1;
 
 
-ALTER TABLE purchase_id_seq OWNER TO testuser;
+ALTER TABLE public.purchase_id_seq OWNER TO testuser;
 
 --
 -- Name: purchase_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE purchase_id_seq OWNED BY purchase.id;
+ALTER SEQUENCE public.purchase_id_seq OWNED BY public.purchase.id;
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category ALTER COLUMN id SET DEFAULT nextval('category_id_seq'::regclass);
+ALTER TABLE ONLY public.category ALTER COLUMN id SET DEFAULT nextval('public.category_id_seq'::regclass);
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY customer ALTER COLUMN id SET DEFAULT nextval('customer_id_seq'::regclass);
+ALTER TABLE ONLY public.customer ALTER COLUMN id SET DEFAULT nextval('public.customer_id_seq'::regclass);
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY product ALTER COLUMN id SET DEFAULT nextval('product_id_seq'::regclass);
+ALTER TABLE ONLY public.product ALTER COLUMN id SET DEFAULT nextval('public.product_id_seq'::regclass);
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase ALTER COLUMN id SET DEFAULT nextval('purchase_id_seq'::regclass);
+ALTER TABLE ONLY public.purchase ALTER COLUMN id SET DEFAULT nextval('public.purchase_id_seq'::regclass);
 
 
 --
 -- Data for Name: category; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY category (id, name) FROM stdin;
+COPY public.category (id, name) FROM stdin;
 7	lukjixpnsav
 137	sjkjfesosvs
 20	xphvq
@@ -1514,14 +1737,14 @@ COPY category (id, name) FROM stdin;
 -- Name: category_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('category_id_seq', 1276, true);
+SELECT pg_catalog.setval('public.category_id_seq', 1276, true);
 
 
 --
 -- Data for Name: category_product; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY category_product (category_id, product_id) FROM stdin;
+COPY public.category_product (category_id, product_id) FROM stdin;
 2	17
 6	6
 22	10
@@ -2782,7 +3005,7 @@ COPY category_product (category_id, product_id) FROM stdin;
 -- Data for Name: customer; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY customer (id, name, email, password, active) FROM stdin;
+COPY public.customer (id, name, email, password, active) FROM stdin;
 2	wgsssjftg	owwnwiqayzjrl	mumgzhspu	t
 6	pepshnvjrq	cxfkjn	czpto	f
 82	toyrghc	rbbfhcudrkev	qxneklcu	f
@@ -4025,14 +4248,14 @@ COPY customer (id, name, email, password, active) FROM stdin;
 -- Name: customer_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('customer_id_seq', 1235, true);
+SELECT pg_catalog.setval('public.customer_id_seq', 1235, true);
 
 
 --
 -- Data for Name: product; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY product (id, name, cost, amount) FROM stdin;
+COPY public.product (id, name, cost, amount) FROM stdin;
 122	bqdddtkz	103	7263
 119	tnjcqnwucb	128	6777
 12	fmovmezikdkj	789	4807
@@ -5346,14 +5569,14 @@ COPY product (id, name, cost, amount) FROM stdin;
 -- Name: product_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('product_id_seq', 1306, true);
+SELECT pg_catalog.setval('public.product_id_seq', 1306, true);
 
 
 --
 -- Data for Name: purchase; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY purchase (id, date_time, customer_id, product_id) FROM stdin;
+COPY public.purchase (id, date_time, customer_id, product_id) FROM stdin;
 1	1990-01-04 10:00:00	12	17
 2	1990-01-04 16:00:00	9	13
 3	1990-01-05 02:00:00	3	7
@@ -6633,14 +6856,14 @@ COPY purchase (id, date_time, customer_id, product_id) FROM stdin;
 -- Name: purchase_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('purchase_id_seq', 1272, true);
+SELECT pg_catalog.setval('public.purchase_id_seq', 1272, true);
 
 
 --
 -- Name: category_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category
+ALTER TABLE ONLY public.category
     ADD CONSTRAINT category_pkey PRIMARY KEY (id);
 
 
@@ -6648,7 +6871,7 @@ ALTER TABLE ONLY category
 -- Name: category_product_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category_product
+ALTER TABLE ONLY public.category_product
     ADD CONSTRAINT category_product_pkey PRIMARY KEY (category_id, product_id);
 
 
@@ -6656,7 +6879,7 @@ ALTER TABLE ONLY category_product
 -- Name: customer_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY customer
+ALTER TABLE ONLY public.customer
     ADD CONSTRAINT customer_pkey PRIMARY KEY (id);
 
 
@@ -6664,7 +6887,7 @@ ALTER TABLE ONLY customer
 -- Name: product_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY product
+ALTER TABLE ONLY public.product
     ADD CONSTRAINT product_pkey PRIMARY KEY (id);
 
 
@@ -6672,44 +6895,133 @@ ALTER TABLE ONLY product
 -- Name: purchase_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase
+ALTER TABLE ONLY public.purchase
     ADD CONSTRAINT purchase_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: category ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.category
+   WHERE (EXISTS ( SELECT 1
+           FROM public.category
+          WHERE (category.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.category_product
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.category_product cp
+             JOIN public.category c ON ((new.category_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.category_product
+          WHERE ((category_product.product_id = new.product_id) AND (category_product.category_id = new.category_id))))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: customer ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.customer
+   WHERE (EXISTS ( SELECT 1
+           FROM public.customer
+          WHERE (customer.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: product ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.product
+   WHERE (EXISTS ( SELECT 1
+           FROM public.product
+          WHERE (product.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: purchase ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.purchase
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.purchase pu
+             JOIN public.customer c ON ((new.customer_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.purchase
+          WHERE (purchase.id = new.id)))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product ignore_update_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_update_violation AS
+    ON UPDATE TO public.category_product
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.category_product cp
+             JOIN public.category c ON ((new.category_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.category_product
+          WHERE ((category_product.product_id = new.product_id) AND (category_product.category_id = new.category_id))))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: purchase ignore_update_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_update_violation AS
+    ON UPDATE TO public.purchase
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.purchase pu
+             JOIN public.customer c ON ((new.customer_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.purchase
+          WHERE (purchase.id = new.id)))) DO INSTEAD NOTHING;
 
 
 --
 -- Name: category_product_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category_product
-    ADD CONSTRAINT category_product_category_id_fkey FOREIGN KEY (category_id) REFERENCES category(id);
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.category(id);
 
 
 --
 -- Name: category_product_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category_product
-    ADD CONSTRAINT category_product_product_id_fkey FOREIGN KEY (product_id) REFERENCES product(id);
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
 
 
 --
 -- Name: purchase_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase
-    ADD CONSTRAINT purchase_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer(id);
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(id);
 
 
 --
 -- Name: purchase_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase
-    ADD CONSTRAINT purchase_product_id_fkey FOREIGN KEY (product_id) REFERENCES product(id);
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
 
 
 --
--- Name: public; Type: ACL; Schema: -; Owner: postgres
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: postgres
 --
 
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

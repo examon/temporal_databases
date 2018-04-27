@@ -148,3 +148,43 @@ return sql;
 
 end
 $$ language plpgsql;
+
+-- deletes
+create or replace function generate_deletes(my_table text, size int) returns text as $$
+declare
+sql text;
+my_ids integer[];
+id integer;
+
+begin
+my_ids:= array(select round(random()*1000)::integer from generate_series(1,size));
+
+sql:='';
+foreach id in array my_ids
+loop
+sql:=sql||'DELETE FROM '||my_table|| ' WHERE id = ' || id || ';';
+
+end loop;
+return sql;
+
+end
+$$ language plpgsql;
+
+create or replace function generate_deletes(size int) returns text as $$
+declare
+tables text[] := ARRAY['purchase'];
+my_table text;
+sql text;
+
+begin
+
+
+sql:='';
+foreach my_table in array tables
+loop
+sql:=sql||generate_deletes(my_table, size);
+end loop;
+return sql;
+
+end
+$$ language plpgsql;

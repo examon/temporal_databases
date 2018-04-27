@@ -2,13 +2,14 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 9.5.10
--- Dumped by pg_dump version 9.5.10
+-- Dumped from database version 9.5.12
+-- Dumped by pg_dump version 9.5.12
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
 SET client_min_messages = warning;
 SET row_security = off;
@@ -41,7 +42,229 @@ CREATE EXTENSION IF NOT EXISTS temporal_tables WITH SCHEMA public;
 COMMENT ON EXTENSION temporal_tables IS 'temporal tables';
 
 
-SET search_path = public, pg_catalog;
+--
+-- Name: generate_inserts(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_inserts(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[];
+my_table text;
+sql text;
+
+begin
+with sub as (select table_name
+from information_schema.columns
+where table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+group by table_name
+)
+select array_agg(table_name::text) from sub into tables;
+
+sql:='';
+foreach my_table in array tables
+loop
+sql:=sql||generate_inserts(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_inserts(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_inserts(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_inserts(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+columns text[];
+
+begin
+with sub as (select column_name
+from information_schema.columns
+where table_name=my_table and column_name not like 'id' and column_name not like 'sys_period' and table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+)
+select array_agg(column_name::text) from sub into columns;
+
+sql:='';
+for i in 1..size
+loop
+sql:=sql||'insert into '||my_table||' ('||array_to_string(columns, ',')||') values ('||array_to_string((select array(select ''''||generate_value(my_table, unnest(columns))||'''')),',')||');';
+
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_inserts(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[];
+my_table text;
+sql text;
+
+begin
+with sub as (select table_name
+from information_schema.columns
+where table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+group by table_name
+)
+select array_agg(table_name::text) from sub into tables;
+
+sql:='';
+foreach my_table in array tables -- return table?
+loop
+sql:=sql||generate_updates(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+columns text[];
+
+begin
+with sub as (select column_name
+from information_schema.columns
+where table_schema='public' and table_name=my_table and column_name not like 'id' and column_name not like 'sys_period' and table_name not like '%history' and is_updatable='YES'
+)
+select array_agg(column_name::text) from sub into columns;
+
+return generate_updates(my_table, columns[ceil(random()*array_length(columns,1))], size, null);
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(text, text, integer, integer[]); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(my_table text, my_column text, size integer, my_ids integer[]) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+var text;
+ids text;
+id integer;
+idtxt text;
+
+begin
+
+if my_ids is null 
+then my_ids:= array(select round(random()*1000)::integer from generate_series(1,size));
+end if;
+ids:=array_to_string(my_ids, ',');
+size:=array_length(my_ids,1);
+idtxt:='id';
+sql:='';
+
+foreach id in array my_ids
+loop
+if my_table = 'category_product'
+then idtxt:='category_id = '||id||' and product_id';
+end if;
+
+var:=generate_value(my_table, my_column);
+sql:=sql||'update '||my_table||' set '||my_column||' = '''||var||''' where '||idtxt||' = '||id||';';
+
+--'from generate_series(1,'||size||') as generator) '||
+end loop; 
+
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(my_table text, my_column text, size integer, my_ids integer[]) OWNER TO lukas;
+
+--
+-- Name: generate_value(text, text); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_value(my_table text, my_column text) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+my_type text;
+begin
+select  /*case 
+when data_type='character varying' 
+then 'varchar('||character_maximum_length||')'
+when data_type='numeric' then 'numeric('||numeric_precision||','||numeric_scale||')'
+else*/ data_type
+--end
+from information_schema.columns
+where table_schema='public' and table_name=my_table and column_name=my_column and is_updatable='YES' into my_type;
+
+if (my_type like 'character varying') then return (select array_to_string(array(select chr((ascii('a')+round(random()*25))::integer) from generate_series(1,ceil(random()*20)::int)), ''));
+elsif (my_type = 'integer') then return round(random()*1000)::integer;
+elsif my_type = 'timestamp without time zone' then return current_timestamp::timestamp - random() * (current_timestamp - '1990-01-01 01:01:01'::timestamp);
+elsif my_type = 'boolean' then return random() > 0.5;
+else raise notice 'not supported';
+end if;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_value(my_table text, my_column text) OWNER TO lukas;
+
+--
+-- Name: measure_exec_time(character varying); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.measure_exec_time(sql_txt character varying, OUT "elapsed_time [ms]" real) RETURNS real
+    LANGUAGE plpgsql
+    AS $$ 
+declare
+t0 timestamptz;
+t1 timestamptz;
+
+begin
+CHECKPOINT; --DBCC DROPCLEANBUFFERS; DBCC FREEPROCCACHE; v sql 2016
+t0 := clock_timestamp();
+execute sql_txt;-- queries
+t1 := clock_timestamp();
+"elapsed_time [ms]" := 1000*(extract(epoch from t1)-extract(epoch from t0));
+end;
+
+$$;
+
+
+ALTER FUNCTION public.measure_exec_time(sql_txt character varying, OUT "elapsed_time [ms]" real) OWNER TO lukas;
 
 SET default_tablespace = '';
 
@@ -51,33 +274,51 @@ SET default_with_oids = false;
 -- Name: category; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE category (
+CREATE TABLE public.category (
     id integer NOT NULL,
     name character varying(100),
     sys_period tstzrange NOT NULL
 );
 
 
-ALTER TABLE category OWNER TO testuser;
+ALTER TABLE public.category OWNER TO testuser;
 
 --
 -- Name: category_history; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE category_history (
+CREATE TABLE public.category_history (
     id integer NOT NULL,
     name character varying(100),
     sys_period tstzrange NOT NULL
 );
 
 
-ALTER TABLE category_history OWNER TO testuser;
+ALTER TABLE public.category_history OWNER TO testuser;
+
+--
+-- Name: categories_with_history; Type: VIEW; Schema: public; Owner: lukas
+--
+
+CREATE VIEW public.categories_with_history AS
+ SELECT category.id,
+    category.name,
+    category.sys_period
+   FROM public.category
+UNION ALL
+ SELECT category_history.id,
+    category_history.name,
+    category_history.sys_period
+   FROM public.category_history;
+
+
+ALTER TABLE public.categories_with_history OWNER TO lukas;
 
 --
 -- Name: category_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE category_id_seq
+CREATE SEQUENCE public.category_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -85,33 +326,33 @@ CREATE SEQUENCE category_id_seq
     CACHE 1;
 
 
-ALTER TABLE category_id_seq OWNER TO testuser;
+ALTER TABLE public.category_id_seq OWNER TO testuser;
 
 --
 -- Name: category_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE category_id_seq OWNED BY category.id;
+ALTER SEQUENCE public.category_id_seq OWNED BY public.category.id;
 
 
 --
 -- Name: category_product; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE category_product (
+CREATE TABLE public.category_product (
     category_id integer NOT NULL,
     product_id integer NOT NULL,
     sys_period tstzrange NOT NULL
 );
 
 
-ALTER TABLE category_product OWNER TO testuser;
+ALTER TABLE public.category_product OWNER TO testuser;
 
 --
 -- Name: customer; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE customer (
+CREATE TABLE public.customer (
     id integer NOT NULL,
     name character varying(100),
     email character varying(100),
@@ -121,13 +362,13 @@ CREATE TABLE customer (
 );
 
 
-ALTER TABLE customer OWNER TO testuser;
+ALTER TABLE public.customer OWNER TO testuser;
 
 --
 -- Name: customer_history; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE customer_history (
+CREATE TABLE public.customer_history (
     id integer NOT NULL,
     name character varying(100),
     email character varying(100),
@@ -137,13 +378,13 @@ CREATE TABLE customer_history (
 );
 
 
-ALTER TABLE customer_history OWNER TO testuser;
+ALTER TABLE public.customer_history OWNER TO testuser;
 
 --
 -- Name: customer_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE customer_id_seq
+CREATE SEQUENCE public.customer_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -151,20 +392,44 @@ CREATE SEQUENCE customer_id_seq
     CACHE 1;
 
 
-ALTER TABLE customer_id_seq OWNER TO testuser;
+ALTER TABLE public.customer_id_seq OWNER TO testuser;
 
 --
 -- Name: customer_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE customer_id_seq OWNED BY customer.id;
+ALTER SEQUENCE public.customer_id_seq OWNED BY public.customer.id;
 
+
+--
+-- Name: customers_with_history; Type: VIEW; Schema: public; Owner: lukas
+--
+
+CREATE VIEW public.customers_with_history AS
+ SELECT customer.id,
+    customer.name,
+    customer.email,
+    customer.password,
+    customer.active,
+    customer.sys_period
+   FROM public.customer
+UNION ALL
+ SELECT customer_history.id,
+    customer_history.name,
+    customer_history.email,
+    customer_history.password,
+    customer_history.active,
+    customer_history.sys_period
+   FROM public.customer_history;
+
+
+ALTER TABLE public.customers_with_history OWNER TO lukas;
 
 --
 -- Name: product; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE product (
+CREATE TABLE public.product (
     id integer NOT NULL,
     name character varying(100),
     cost integer,
@@ -173,13 +438,13 @@ CREATE TABLE product (
 );
 
 
-ALTER TABLE product OWNER TO testuser;
+ALTER TABLE public.product OWNER TO testuser;
 
 --
 -- Name: product_history; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE product_history (
+CREATE TABLE public.product_history (
     id integer NOT NULL,
     name character varying(100),
     cost integer,
@@ -188,13 +453,13 @@ CREATE TABLE product_history (
 );
 
 
-ALTER TABLE product_history OWNER TO testuser;
+ALTER TABLE public.product_history OWNER TO testuser;
 
 --
 -- Name: product_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE product_id_seq
+CREATE SEQUENCE public.product_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -202,20 +467,42 @@ CREATE SEQUENCE product_id_seq
     CACHE 1;
 
 
-ALTER TABLE product_id_seq OWNER TO testuser;
+ALTER TABLE public.product_id_seq OWNER TO testuser;
 
 --
 -- Name: product_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE product_id_seq OWNED BY product.id;
+ALTER SEQUENCE public.product_id_seq OWNED BY public.product.id;
 
+
+--
+-- Name: products_with_history; Type: VIEW; Schema: public; Owner: lukas
+--
+
+CREATE VIEW public.products_with_history AS
+ SELECT product.id,
+    product.name,
+    product.cost,
+    product.amount,
+    product.sys_period
+   FROM public.product
+UNION ALL
+ SELECT product_history.id,
+    product_history.name,
+    product_history.cost,
+    product_history.amount,
+    product_history.sys_period
+   FROM public.product_history;
+
+
+ALTER TABLE public.products_with_history OWNER TO lukas;
 
 --
 -- Name: purchase; Type: TABLE; Schema: public; Owner: testuser
 --
 
-CREATE TABLE purchase (
+CREATE TABLE public.purchase (
     id integer NOT NULL,
     date_time timestamp without time zone,
     customer_id integer,
@@ -224,13 +511,13 @@ CREATE TABLE purchase (
 );
 
 
-ALTER TABLE purchase OWNER TO testuser;
+ALTER TABLE public.purchase OWNER TO testuser;
 
 --
 -- Name: purchase_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
 --
 
-CREATE SEQUENCE purchase_id_seq
+CREATE SEQUENCE public.purchase_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -238,48 +525,48 @@ CREATE SEQUENCE purchase_id_seq
     CACHE 1;
 
 
-ALTER TABLE purchase_id_seq OWNER TO testuser;
+ALTER TABLE public.purchase_id_seq OWNER TO testuser;
 
 --
 -- Name: purchase_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
 --
 
-ALTER SEQUENCE purchase_id_seq OWNED BY purchase.id;
+ALTER SEQUENCE public.purchase_id_seq OWNED BY public.purchase.id;
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category ALTER COLUMN id SET DEFAULT nextval('category_id_seq'::regclass);
+ALTER TABLE ONLY public.category ALTER COLUMN id SET DEFAULT nextval('public.category_id_seq'::regclass);
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY customer ALTER COLUMN id SET DEFAULT nextval('customer_id_seq'::regclass);
+ALTER TABLE ONLY public.customer ALTER COLUMN id SET DEFAULT nextval('public.customer_id_seq'::regclass);
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY product ALTER COLUMN id SET DEFAULT nextval('product_id_seq'::regclass);
+ALTER TABLE ONLY public.product ALTER COLUMN id SET DEFAULT nextval('public.product_id_seq'::regclass);
 
 
 --
 -- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase ALTER COLUMN id SET DEFAULT nextval('purchase_id_seq'::regclass);
+ALTER TABLE ONLY public.purchase ALTER COLUMN id SET DEFAULT nextval('public.purchase_id_seq'::regclass);
 
 
 --
 -- Data for Name: category; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY category (id, name, sys_period) FROM stdin;
+COPY public.category (id, name, sys_period) FROM stdin;
 82	qkinw	["1991-02-16 14:00:00+01",)
 78	twsjvucnisshcwx	["1990-06-17 14:00:00+02",)
 107	vimmnwkddrwu	["1990-11-24 04:00:00+01",)
@@ -311,7 +598,6 @@ COPY category (id, name, sys_period) FROM stdin;
 45	ckica	["1990-08-02 20:00:00+02",)
 74	lqoaayv	["1990-05-17 21:00:00+02",)
 42	qkmloc	["1990-08-15 07:00:00+02",)
-117	juvwowbyw	["1990-11-01 10:00:00+01",)
 77	tjuirf	["1990-02-05 08:00:00+01",)
 123	jmlac	["1990-02-13 11:00:00+01",)
 103	babchaoswocatvy	["1990-10-07 18:00:00+01",)
@@ -703,7 +989,6 @@ COPY category (id, name, sys_period) FROM stdin;
 468	xijmho	["1990-06-15 07:00:00+02",)
 480	vqxrlsevewakc	["1990-06-15 08:00:00+02",)
 481	wtjonscid	["1990-06-15 11:00:00+02",)
-444	rgpclwoepilwqef	["1990-08-12 16:00:00+02",)
 484	olnciucoktq	["1990-06-16 01:00:00+02",)
 485	uvwtkpkubork	["1990-06-16 02:00:00+02",)
 421	lvxjbzjuzlc	["1990-06-16 06:00:00+02",)
@@ -1554,6 +1839,8 @@ COPY category (id, name, sys_period) FROM stdin;
 1273	giuana	["1991-03-27 22:00:00+01",)
 810	ehqmysgkfrgexv	["1991-03-28 08:00:00+01",)
 1274	wgueqq	["1991-03-28 11:00:00+01",)
+444	dagncpx	["2018-04-26 19:49:36.148908+02",)
+117	wfuymrwqvogqx	["2018-04-26 19:49:36.763915+02",)
 \.
 
 
@@ -1561,7 +1848,7 @@ COPY category (id, name, sys_period) FROM stdin;
 -- Data for Name: category_history; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY category_history (id, name, sys_period) FROM stdin;
+COPY public.category_history (id, name, sys_period) FROM stdin;
 4	bekizyrfxnyvk	["1990-01-01 21:00:00+01","1990-01-04 19:00:00+01")
 17	moamaxdgmo	["1990-01-03 12:00:00+01","1990-01-05 05:00:00+01")
 6	tkwjbpdep	["1990-01-02 03:00:00+01","1990-01-05 06:00:00+01")
@@ -2834,6 +3121,8 @@ COPY category_history (id, name, sys_period) FROM stdin;
 1134	rvjaxdhusdojtye	["1991-02-11 07:00:00+01","1991-03-27 23:00:00+01")
 1156	fpkkeurxxdprkrr	["1991-02-16 16:00:00+01","1991-03-28 05:00:00+01")
 810	oufrzhs	["1990-10-13 11:00:00+01","1991-03-28 08:00:00+01")
+444	rgpclwoepilwqef	["1990-08-12 16:00:00+02","2018-04-26 19:49:36.148908+02")
+117	juvwowbyw	["1990-11-01 10:00:00+01","2018-04-26 19:49:36.763915+02")
 \.
 
 
@@ -2841,14 +3130,14 @@ COPY category_history (id, name, sys_period) FROM stdin;
 -- Name: category_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('category_id_seq', 1274, true);
+SELECT pg_catalog.setval('public.category_id_seq', 1274, true);
 
 
 --
 -- Data for Name: category_product; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY category_product (category_id, product_id, sys_period) FROM stdin;
+COPY public.category_product (category_id, product_id, sys_period) FROM stdin;
 14	17	["1990-01-04 03:00:00+01",)
 1	16	["1990-01-04 12:00:00+01",)
 18	21	["1990-01-04 14:00:00+01",)
@@ -4096,7 +4385,7 @@ COPY category_product (category_id, product_id, sys_period) FROM stdin;
 -- Data for Name: customer; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY customer (id, name, email, password, active, sys_period) FROM stdin;
+COPY public.customer (id, name, email, password, active, sys_period) FROM stdin;
 14	jwjmhtraxqhvp	xysebelanddk	dkishfamd	t	["1991-01-10 00:00:00+01",)
 91	ydgxaz	imrszlpuurv	skjtbfqa	f	["1990-07-17 21:00:00+02",)
 24	ubsees	npbwaqvxdgp	mudnugmpt	t	["1990-08-14 18:00:00+02",)
@@ -4502,7 +4791,6 @@ COPY customer (id, name, email, password, active, sys_period) FROM stdin;
 453	jwcybfjwspuefbm	tfdofyetqedp	vstxzue	t	["1990-07-04 01:00:00+02",)
 462	bxqygk	hjwkoqmo	pryoxqmocy	t	["1990-06-08 15:00:00+02",)
 463	kloggqhnmmrmab	hpvku	pnurpdanwxwnt	f	["1990-06-08 17:00:00+02",)
-467	mnbwuji	vnrkcedjcq	kmcwjhugywzbjrs	f	["1990-06-10 14:00:00+02",)
 469	ijeep	vgbircqkhwopor	egcbuzmh	f	["1990-06-10 23:00:00+02",)
 470	wxyjheayclgaa	yzyncslteup	uqejomoi	f	["1990-06-11 00:00:00+02",)
 456	saeej	eifuhzbyq	sbzpfgioqmbvf	f	["1990-07-20 04:00:00+02",)
@@ -4769,7 +5057,6 @@ COPY customer (id, name, email, password, active, sys_period) FROM stdin;
 702	kkltmlnexwyogzv	vxvpiugryu	zpgwpykygfes	t	["1990-08-26 20:00:00+02",)
 703	ayrljna	zgkshai	cknmbkroob	f	["1990-08-27 07:00:00+02",)
 705	cpnuz	bpzvshduu	nnkpzpbv	f	["1990-08-28 04:00:00+02",)
-707	qmynahjm	xnhdopkz	ktzbngbxbytglmv	t	["1990-08-28 21:00:00+02",)
 709	xvfwbqyjyyztk	cqhjyfdhk	jccgckgip	t	["1990-09-01 04:00:00+02",)
 711	qovlflyjvrz	qgvhwihwa	oidvod	t	["1990-09-01 17:00:00+02",)
 688	qwnyhu	ttdbojqxmi	dtnvjtooe	t	["1990-11-07 07:00:00+01",)
@@ -5405,6 +5692,8 @@ COPY customer (id, name, email, password, active, sys_period) FROM stdin;
 1306	wtgfshkld	byoetwaffslyt	ttwntz	f	["1991-03-27 19:00:00+01",)
 1307	niomxyfbbrqatdz	dipfzjmenzepolo	mtbevlaf	t	["1991-03-27 20:00:00+01",)
 1308	fawotbzwxn	fckobuodsigh	fenkjygal	f	["1991-03-28 02:00:00+01",)
+707	qmynahjm	skdpryunpjdqw	ktzbngbxbytglmv	t	["2018-04-26 19:49:34.047116+02",)
+467	mnbwuji	lcjkohhecgwyeeqqujb	kmcwjhugywzbjrs	f	["2018-04-26 19:49:34.653033+02",)
 \.
 
 
@@ -5412,7 +5701,7 @@ COPY customer (id, name, email, password, active, sys_period) FROM stdin;
 -- Data for Name: customer_history; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY customer_history (id, name, email, password, active, sys_period) FROM stdin;
+COPY public.customer_history (id, name, email, password, active, sys_period) FROM stdin;
 6	tryugoreggmjjzo	ngggyhenvo	oudkm	f	["1990-01-02 05:00:00+01","1990-01-04 09:00:00+01")
 12	hckiyjtj	cvnekfqzsldwla	kcdjyv	f	["1990-01-02 23:00:00+01","1990-01-04 18:00:00+01")
 22	rdhfcsbj	oxwogqfkxeuue	lgrsjo	f	["1990-01-04 04:00:00+01","1990-01-04 22:00:00+01")
@@ -6698,6 +6987,8 @@ COPY customer_history (id, name, email, password, active, sys_period) FROM stdin
 667	kqejpjqiobgb	vgfzcnljbtqe	lcdiy	t	["1990-08-16 02:00:00+02","1991-03-28 00:00:00+01")
 399	qwacvnurl	gzzhmolwfppv	eugqfaejieggduk	t	["1991-01-12 12:00:00+01","1991-03-28 01:00:00+01")
 388	irxxonddtbkdxtt	fbigyx	ovvrcmdxgxvkewf	f	["1990-05-10 05:00:00+02","1991-03-28 03:00:00+01")
+707	qmynahjm	xnhdopkz	ktzbngbxbytglmv	t	["1990-08-28 21:00:00+02","2018-04-26 19:49:34.047116+02")
+467	mnbwuji	vnrkcedjcq	kmcwjhugywzbjrs	f	["1990-06-10 14:00:00+02","2018-04-26 19:49:34.653033+02")
 \.
 
 
@@ -6705,14 +6996,14 @@ COPY customer_history (id, name, email, password, active, sys_period) FROM stdin
 -- Name: customer_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('customer_id_seq', 1308, true);
+SELECT pg_catalog.setval('public.customer_id_seq', 1308, true);
 
 
 --
 -- Data for Name: product; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY product (id, name, cost, amount, sys_period) FROM stdin;
+COPY public.product (id, name, cost, amount, sys_period) FROM stdin;
 12	vpyyktwgpbdzxz	184	1677	["1990-04-17 14:00:00+02",)
 68	juusxzmryfwsmrj	223	2681	["1990-01-18 21:00:00+01",)
 71	vgigboyul	566	7756	["1990-05-15 10:00:00+02",)
@@ -7250,7 +7541,6 @@ COPY product (id, name, cost, amount, sys_period) FROM stdin;
 526	vngimvd	510	1914	["1991-03-12 19:00:00+01",)
 460	wbvknsekq	538	3741	["1991-01-25 07:00:00+01",)
 504	fxttwffwab	426	7463	["1991-03-28 14:00:00+01",)
-549	gvkepusqfppqiz	772	9094	["1991-02-12 20:00:00+01",)
 508	ezwoun	719	2882	["1991-03-20 09:00:00+01",)
 509	unqkhwpdblfynob	955	1098	["1991-02-22 15:00:00+01",)
 534	rcgrz	255	4669	["1991-03-01 11:00:00+01",)
@@ -7551,7 +7841,6 @@ COPY product (id, name, cost, amount, sys_period) FROM stdin;
 865	ogqjrybhoib	902	4521	["1990-11-20 01:00:00+01",)
 104	rcrdfqisritmpvh	5	5761	["1990-11-20 13:00:00+01",)
 866	synnozjqhptcrzy	373	9740	["1990-11-20 14:00:00+01",)
-867	pznlqpkfdl	736	233	["1990-11-20 19:00:00+01",)
 868	tvujxqgehwfu	11	9931	["1990-11-20 21:00:00+01",)
 869	odrsoney	867	8791	["1990-11-21 02:00:00+01",)
 870	ieikahinldqe	928	9837	["1990-11-21 08:00:00+01",)
@@ -7958,6 +8247,8 @@ COPY product (id, name, cost, amount, sys_period) FROM stdin;
 1086	awwemsqisvlpqo	936	5487	["1991-03-28 09:00:00+01",)
 1244	ebjmp	422	4201	["1991-03-28 10:00:00+01",)
 1245	okuzoyi	158	6180	["1991-03-28 13:00:00+01",)
+549	kqfvtnyttmvjkmgphfcy	772	9094	["2018-04-26 19:49:37.380982+02",)
+867	su	736	233	["2018-04-26 19:49:37.990169+02",)
 \.
 
 
@@ -7965,7 +8256,7 @@ COPY product (id, name, cost, amount, sys_period) FROM stdin;
 -- Data for Name: product_history; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY product_history (id, name, cost, amount, sys_period) FROM stdin;
+COPY public.product_history (id, name, cost, amount, sys_period) FROM stdin;
 13	cpqxmmnb	342	6952	["1990-01-03 01:00:00+01","1990-01-04 05:00:00+01")
 12	vpyyktwgpbdzxz	752	1677	["1990-01-02 22:00:00+01","1990-01-04 16:00:00+01")
 17	enoxwrevvbd	998	8826	["1990-01-03 13:00:00+01","1990-01-04 17:00:00+01")
@@ -9167,6 +9458,8 @@ COPY product_history (id, name, cost, amount, sys_period) FROM stdin;
 1086	awwemsqisvlpqo	202	5487	["1991-02-09 13:00:00+01","1991-03-28 09:00:00+01")
 504	fxttwffwab	25	7463	["1990-07-13 01:00:00+02","1991-03-28 14:00:00+01")
 49	bvgdvjhvn	310	5467	["1990-06-23 07:00:00+02","1991-03-28 15:00:00+01")
+549	gvkepusqfppqiz	772	9094	["1991-02-12 20:00:00+01","2018-04-26 19:49:37.380982+02")
+867	pznlqpkfdl	736	233	["1990-11-20 19:00:00+01","2018-04-26 19:49:37.990169+02")
 \.
 
 
@@ -9174,14 +9467,14 @@ COPY product_history (id, name, cost, amount, sys_period) FROM stdin;
 -- Name: product_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('product_id_seq', 1245, true);
+SELECT pg_catalog.setval('public.product_id_seq', 1245, true);
 
 
 --
 -- Data for Name: purchase; Type: TABLE DATA; Schema: public; Owner: testuser
 --
 
-COPY purchase (id, date_time, customer_id, product_id, sys_period) FROM stdin;
+COPY public.purchase (id, date_time, customer_id, product_id, sys_period) FROM stdin;
 1	1990-01-04 01:00:00	1	15	["1990-01-04 01:00:00+01",)
 2	1990-01-04 07:00:00	1	5	["1990-01-04 07:00:00+01",)
 3	1990-01-04 20:00:00	11	19	["1990-01-04 20:00:00+01",)
@@ -10424,14 +10717,14 @@ COPY purchase (id, date_time, customer_id, product_id, sys_period) FROM stdin;
 -- Name: purchase_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
 --
 
-SELECT pg_catalog.setval('purchase_id_seq', 1235, true);
+SELECT pg_catalog.setval('public.purchase_id_seq', 1235, true);
 
 
 --
 -- Name: category_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category
+ALTER TABLE ONLY public.category
     ADD CONSTRAINT category_pkey PRIMARY KEY (id);
 
 
@@ -10439,7 +10732,7 @@ ALTER TABLE ONLY category
 -- Name: category_product_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category_product
+ALTER TABLE ONLY public.category_product
     ADD CONSTRAINT category_product_pkey PRIMARY KEY (category_id, product_id);
 
 
@@ -10447,7 +10740,7 @@ ALTER TABLE ONLY category_product
 -- Name: customer_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY customer
+ALTER TABLE ONLY public.customer
     ADD CONSTRAINT customer_pkey PRIMARY KEY (id);
 
 
@@ -10455,7 +10748,7 @@ ALTER TABLE ONLY customer
 -- Name: product_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY product
+ALTER TABLE ONLY public.product
     ADD CONSTRAINT product_pkey PRIMARY KEY (id);
 
 
@@ -10463,79 +10756,168 @@ ALTER TABLE ONLY product
 -- Name: purchase_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase
+ALTER TABLE ONLY public.purchase
     ADD CONSTRAINT purchase_pkey PRIMARY KEY (id);
 
 
 --
+-- Name: category ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.category
+   WHERE (EXISTS ( SELECT 1
+           FROM public.category
+          WHERE (category.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.category_product
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.category_product cp
+             JOIN public.category c ON ((new.category_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.category_product
+          WHERE ((category_product.product_id = new.product_id) AND (category_product.category_id = new.category_id))))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: customer ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.customer
+   WHERE (EXISTS ( SELECT 1
+           FROM public.customer
+          WHERE (customer.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: product ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.product
+   WHERE (EXISTS ( SELECT 1
+           FROM public.product
+          WHERE (product.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: purchase ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.purchase
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.purchase pu
+             JOIN public.customer c ON ((new.customer_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.purchase
+          WHERE (purchase.id = new.id)))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product ignore_update_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_update_violation AS
+    ON UPDATE TO public.category_product
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.category_product cp
+             JOIN public.category c ON ((new.category_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.category_product
+          WHERE ((category_product.product_id = new.product_id) AND (category_product.category_id = new.category_id))))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: purchase ignore_update_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_update_violation AS
+    ON UPDATE TO public.purchase
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.purchase pu
+             JOIN public.customer c ON ((new.customer_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.purchase
+          WHERE (purchase.id = new.id)))) DO INSTEAD NOTHING;
+
+
+--
 -- Name: versioning_trigger; Type: TRIGGER; Schema: public; Owner: testuser
 --
 
-CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON category FOR EACH ROW EXECUTE PROCEDURE versioning('sys_period', 'category_history', 'true');
+CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON public.category FOR EACH ROW EXECUTE PROCEDURE public.versioning('sys_period', 'category_history', 'true');
 
 
 --
 -- Name: versioning_trigger; Type: TRIGGER; Schema: public; Owner: testuser
 --
 
-CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON category_product FOR EACH ROW EXECUTE PROCEDURE versioning('sys_period', 'category_product_history', 'true');
+CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON public.category_product FOR EACH ROW EXECUTE PROCEDURE public.versioning('sys_period', 'category_product_history', 'true');
 
 
 --
 -- Name: versioning_trigger; Type: TRIGGER; Schema: public; Owner: testuser
 --
 
-CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON customer FOR EACH ROW EXECUTE PROCEDURE versioning('sys_period', 'customer_history', 'true');
+CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON public.customer FOR EACH ROW EXECUTE PROCEDURE public.versioning('sys_period', 'customer_history', 'true');
 
 
 --
 -- Name: versioning_trigger; Type: TRIGGER; Schema: public; Owner: testuser
 --
 
-CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON product FOR EACH ROW EXECUTE PROCEDURE versioning('sys_period', 'product_history', 'true');
+CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON public.product FOR EACH ROW EXECUTE PROCEDURE public.versioning('sys_period', 'product_history', 'true');
 
 
 --
 -- Name: versioning_trigger; Type: TRIGGER; Schema: public; Owner: testuser
 --
 
-CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON purchase FOR EACH ROW EXECUTE PROCEDURE versioning('sys_period', 'purchase_history', 'true');
+CREATE TRIGGER versioning_trigger BEFORE INSERT OR DELETE OR UPDATE ON public.purchase FOR EACH ROW EXECUTE PROCEDURE public.versioning('sys_period', 'purchase_history', 'true');
 
 
 --
 -- Name: category_product_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category_product
-    ADD CONSTRAINT category_product_category_id_fkey FOREIGN KEY (category_id) REFERENCES category(id);
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.category(id);
 
 
 --
 -- Name: category_product_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY category_product
-    ADD CONSTRAINT category_product_product_id_fkey FOREIGN KEY (product_id) REFERENCES product(id);
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
 
 
 --
 -- Name: purchase_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase
-    ADD CONSTRAINT purchase_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES customer(id);
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(id);
 
 
 --
 -- Name: purchase_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
 --
 
-ALTER TABLE ONLY purchase
-    ADD CONSTRAINT purchase_product_id_fkey FOREIGN KEY (product_id) REFERENCES product(id);
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
 
 
 --
--- Name: public; Type: ACL; Schema: -; Owner: postgres
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: postgres
 --
 
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
