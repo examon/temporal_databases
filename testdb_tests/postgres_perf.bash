@@ -63,6 +63,32 @@ done
 done
 fi
 
+# inserts
+echo
+read -t $timeout -r -n 1 -p "${1:-Run inserts?} [y/n]: " prompt
+if [[ $prompt = "y" || $prompt = "Y" || $prompt = "" ]]; then
+echo $'\n'inserts on $database and $database_hist
+insertin="$inputdir/ti_inserts.txt"
+> $insertin
+chmod a+w $insertin
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select * from generate_inserts($itrs)) TO '$insertin' (format text)"
+
+itr=1
+sql="$(<"$insertin")"
+sql=${sql//\'/\'\'}
+IFS='\;'
+for input in $sql
+do
+sqlexec="'$input;'"
+query=`expr "$input" : '.*\(insert[ ]into[ ]*[a-zA-Z_]*\)'`
+
+"$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'insert' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
+"$POSTGRES_HOME" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'insert' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
+
+itr=$(($itr%$itrs +1))
+done
+fi
+
 # updates
 echo
 read -t $timeout -r -n 1 -p "${1:-Run updates?} [y/n]: " prompt
@@ -70,6 +96,7 @@ if [[ $prompt = "y" || $prompt = "Y" || $prompt = "" ]]; then
 echo $'\n'updates on $database and $database_hist
 updatein="$inputdir/tu_updates.txt"
 > $updatein
+chmod a+w $updatein
 "$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select * from generate_updates($itrs)) TO '$updatein' (format text)"
 
 itr=1
@@ -88,11 +115,13 @@ itr=$(($itr%$itrs +1))
 done
 fi
 
+# deletes
+
 echo
 read -t $timeout -r -n 1 -p "${1:-Run deletes?} [y/n]: " prompt
 if [[ $prompt = "y" || $prompt = "Y" || $prompt = "" ]]; then
 echo $'\n'deletes on $database and $database_hist
-deletein="$inputdir/tu_deletes.txt"
+deletein="$inputdir/td_deletes.txt"
 > $deletein
 chmod a+w $deletein
 "$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select * from generate_deletes($itrs)) TO '$deletein' (format text)"
@@ -106,7 +135,7 @@ IFS='\;'
 for input in $sql
 do
 sqlexec="'$input;'"
-query=`expr "$input" : '.*\(delete[ ]*[a-zA-Z_]*\)'`
+query=`expr "$input" : '.*\(DELETE[ ]FROM[ ]*[a-zA-Z_]*\)'`
 
 "$POSTGRES_HOME" -h $server -U $username -d $database -p $port -c "COPY (select '$database' as database, 'delete' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
 "$POSTGRES_HOME" -h $server -U $username -d $database_hist -p $port -c "COPY (select '$database_hist' as database, 'delete' as category, '$query' as query, $itr as iteration, * from measure_exec_time('$input;')) TO STDOUT WITH CSV" >> $output
