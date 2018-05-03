@@ -5,3 +5,5 @@ th.. aplikovatelne na testdb_history
 ..s_ selecty
 ..sh_ selecty s historiou
 ..u_ updaty
+..d_ delety
+..i_ inserty

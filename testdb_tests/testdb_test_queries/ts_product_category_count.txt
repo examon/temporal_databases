@@ -1,0 +1,5 @@
+/* returns count of products in each category and category names ordered by count*/
+SELECT count(category.id) AS quantity, category.name FROM category
+LEFT JOIN category_product on category.id = category_product.category_id
+LEFT JOIN product ON product.id = category_product.category_id GROUP BY category.id
+ORDER BY quantity desc;
