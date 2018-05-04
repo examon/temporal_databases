@@ -1,0 +1,32 @@
+testdb,select,ts_product_category_count,1,17.318
+testdb_history,select history,ts_product_category_count,1,15.4481
+testdb_history,select history,thsh_category_assignedproducts,1,33.3049
+testdb_history,select history,thsh_category_purchasedproducts,1,34.781
+testdb_history,select history,thsh_customer_category_purchasedproducts,1,39.7179
+testdb_history,select history,thsh_inactivecustomers_interval,1,23.8581
+testdb_history,select history,thsh_monthly_profit,1,29.46
+testdb_history,select history,thsh_product_assignedcategories,1,31.503
+testdb_history,select history,thsh_product_purchase,1,20.3018
+testdb_history,select history,thsh_stockproducts,1,25.228
+testdb,insert,insert into customer,1,8.1439
+testdb_history,insert,insert into customer,1,18.616
+testdb,insert,insert into purchase,1,14.9729
+testdb_history,insert,insert into purchase,1,25.254
+testdb,insert,insert into category,1,7.49493
+testdb_history,insert,insert into category,1,18.2309
+testdb,insert,insert into product,1,7.56693
+testdb_history,insert,insert into product,1,17.719
+testdb,insert,insert into category_product,1,12.0721
+testdb_history,insert,insert into category_product,1,22.7702
+testdb,update,update customer,1,6.54507
+testdb_history,update,update customer,1,18.328
+testdb,update,update purchase,1,10.216
+testdb_history,update,update purchase,1,9.89509
+testdb,update,update category,1,5.95593
+testdb_history,update,update category,1,18.616
+testdb,update,update product,1,6.38509
+testdb_history,update,update product,1,18.3451
+testdb,update,update category_product,1,8.90493
+testdb_history,update,update category_product,1,9.38606
+testdb,delete,DELETE FROM purchase,1,5.94997
+testdb_history,delete,DELETE FROM purchase,1,18.4431
