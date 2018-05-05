@@ -137,14 +137,6 @@ def delete_category_product():
         CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
     advance_time()
 
-def OLD_update_category_product():
-    category_num_ids = utils.count_rows("category")
-    product_num_ids = utils.count_rows("product")
-    category_product_category_id = utils.get_random_number(1, category_num_ids)
-    category_product_product_id = utils.get_random_number(1, product_num_ids)
-    utils.execute("""update category_product set category_id = {CATEGORY_PRODUCT_CATEGORY_ID} where product_id = {CATEGORY_PRODUCT_PRODUCT_ID};""".format(
-        CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
-    advance_time()
 
 ################################################################################
 ## purchase                                                                   ##
@@ -221,10 +213,6 @@ def create_testdb_history():
         if IS_HISTORY:
             utils.table_attach_history(table)
             utils.create_history_table(table)
-    if IS_HISTORY:
-        #utils.drop_table("category_product_history")
-        #utils.drop_table("purchase_history")
-        pass
 
     ## list of database modification functions
     functions = [insert_category, update_category,
