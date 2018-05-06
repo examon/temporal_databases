@@ -16,6 +16,8 @@ tables <- rbind(table[["test_results_1000.csv"]], table[["test_results_200.csv"]
 
 # Give the chart file a name.
 png(file = "average_200_1000", width = 760, height = 570)
+# Save the file.
+# dev.off()
 
 # Plot the bar chart.
 plot(1,type='n',xlim=c(0,35000),ylim=c(0.0,700.0),xlab='Count', ylab='elapsed time [ms]')
@@ -25,19 +27,49 @@ lines(table[["test_results_1000.csv"]]$time, type = "l", col="red", lwd=2)
 legend("topright", inset=.02, title="Number of tests",
        lty=1, bty='n', c("200","1000"), col = c("green", "red"), horiz=TRUE, cex=0.8)
 
-# average
+# average for 200 and 1000 itrs
 means200 <- aggregate(time ~ category, table[["test_results_200.csv"]], mean)
 means200$test <- '200'
 means1000 <- aggregate(time ~ category, table[["test_results_1000.csv"]], mean)
 means1000$test <- '1000'
 means <- rbind(means200, means1000)
+
 ggplot(means, aes(x = category, fill = test, y = time)) +
   geom_bar(stat = "identity", position = position_dodge()) +
   geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
-  labs(title="Average for testdb and testdb_history")
+  labs(title="Average for testdb and testdb_history (200 + 1000 itrs)")
 
-# Save the file.
-dev.off()
+# average for 1000 itrs
+means_testdb <- aggregate(time ~ category, 
+                          table[["test_results_1000.csv"]]
+                          [table[["test_results_1000.csv"]]$db == "testdb",], mean)
+means_testdb$test <- 'testdb'
+means_testdb_history <- aggregate(time ~ category, 
+                          table[["test_results_1000.csv"]]
+                          [table[["test_results_1000.csv"]]$db == "testdb_history",], mean)
+means_testdb_history$test <- 'testdb_history'
+means <- rbind(means_testdb, means_testdb_history)
+
+ggplot(means, aes(x = category, fill = test, y = time)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
+  labs(title="Average for testdb and testdb_history (1000 itrs)")
+
+# average for 200 itrs
+means_testdb <- aggregate(time ~ category, 
+                          table[["test_results_200.csv"]]
+                          [table[["test_results_200.csv"]]$db == "testdb",], mean)
+means_testdb$test <- 'testdb'
+means_testdb_history <- aggregate(time ~ category, 
+                                  table[["test_results_200.csv"]]
+                                  [table[["test_results_200.csv"]]$db == "testdb_history",], mean)
+means_testdb_history$test <- 'testdb_history'
+means <- rbind(means_testdb, means_testdb_history)
+
+ggplot(means, aes(x = category, fill = test, y = time)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
+  labs(title="Average for testdb and testdb_history (200 itrs)")
 
 ###################################################33
 
