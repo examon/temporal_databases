@@ -9,9 +9,12 @@ table$category[ grepl("ts_", table$query) ] <- "select"
 
 # by db
 testdb <- table[table$db == "testdb", ]
+mean (testdb$time)
 testdb_history <- table[table$db == "testdb_history", ]
+mean (testdb_history$time)
 # without select history
 testdb_history_exclude_select_history <- testdb_history[ testdb_history$category != "select history", ]
+mean (testdb_history_exclude_select_history$time)
 
 # by select
 testdb_select <- testdb[testdb$category == "select", ]
@@ -46,9 +49,6 @@ mean (testdb_history_delete$time)
 delete <- table[table$category == "delete", ]
 # nrow() je rovnaky
 
-# avg
-mean (testdb$time)
-mean (testdb_history$time)
 # rozpyl a smerodatna odchylka
 rozptyl <- mean (testdb$time^2) - mean (testdb$time)^2
 rozptyl
