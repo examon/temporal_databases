@@ -5,20 +5,24 @@ test <- read.csv (file = "test_results_1000.csv", header = FALSE, sep = ",", dec
 str(test)
 table <- data.frame (db=test$V1, category=test$V2, query=test$V3, iteration=test$V4, time=test$V5)
 table
+table$category[ grepl("ts_", table$query) ] <- "select"
 
 # by db
 testdb <- table[table$db == "testdb", ]
-testdb_history <- table[table$db == "testdb_history" & !grepl("thsh_", table$query), ]
+testdb_history <- table[table$db == "testdb_history", ]
+# without select history
+testdb_history_exclude_select_history <- testdb_history[ testdb_history$category != "select history", ]
+
 # by select
 testdb_select <- testdb[testdb$category == "select", ]
 mean (testdb_select$time)
-testdb_history_select <- testdb_history[ grepl("ts_", testdb_history$query), ]
+testdb_history_select <- testdb_history[ testdb_history$category == "select", ]
 mean (testdb_history_select$time)
 
-select <- table[ grepl("ts_", table$query), ]
+select <- table[ table$category == "select", ]
 # by select history
-testdb_history_select_history <- testdb_history[ grepl("thsh_", testdb_history$query), ]
-mean (testdb_history_select$time)
+testdb_history_select_history <- testdb_history[ testdb_history$category == "select history", ]
+mean (testdb_history_select_history$time)
 # by insert
 testdb_insert <- testdb[testdb$category == "insert", ]
 mean (testdb_insert$time)
@@ -45,7 +49,6 @@ delete <- table[table$category == "delete", ]
 # avg
 mean (testdb$time)
 mean (testdb_history$time)
-mean (table[table$db == "testdb_history", ]$time)
 # rozpyl a smerodatna odchylka
 rozptyl <- mean (testdb$time^2) - mean (testdb$time)^2
 rozptyl
@@ -124,6 +127,12 @@ ggplot(data=testdb_history, aes(testdb_history$time)) +
                   aes(fill=..count..)) +
   scale_fill_gradient("Count", low = "green", high = "red")
 
+ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_select_history$time)) + 
+  geom_histogram( breaks=seq(min(table$time), max(table$time), by =0.5), 
+                  col="red", 
+                  aes(fill=..count..)) +
+  scale_fill_gradient("Count", low = "green", high = "red")
+
 # histogramy s rovnakou y osou
 n <- 3000
 
@@ -145,6 +154,17 @@ ggplot(data=testdb_history, aes(testdb_history$time)) +
                  alpha = 1) + 
   scale_fill_gradient("Count", low = "green", high = "red") +
   labs(title="Histogram for testdb_history") +
+  labs(x="time", y="Count") + 
+  xlim(c(0,max(table$time))) +
+  ylim(c(0,n))
+
+ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_select_history$time)) + 
+  geom_histogram(breaks=seq(min(table$time), max(table$time), by = 0.5), 
+                 col="red", 
+                 aes(fill=..count..), 
+                 alpha = 1) + 
+  scale_fill_gradient("Count", low = "green", high = "red") +
+  labs(title="Histogram for testdb_history excluding qieries: select history") +
   labs(x="time", y="Count") + 
   xlim(c(0,max(table$time))) +
   ylim(c(0,n))
