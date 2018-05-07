@@ -1,11 +1,79 @@
 library("ggplot2")
 setwd("C:/Users/windows_sucks/temporal_databases/testdb_tests/testdb_test_results")
 
-test <- read.csv (file = "test_results_1000.csv", header = FALSE, sep = ",", dec = ".")
-str(test)
-table <- data.frame (db=test$V1, category=test$V2, query=test$V3, iteration=test$V4, time=test$V5)
-table
-table$category[ grepl("ts_", table$query) ] <- "select"
+files <- list.files(pattern = "*.csv")
+data <- list()
+table <- list()
+for (i in files) {
+  data[[i]] <- read.csv (file = i, header = FALSE, sep = ",", dec = ".")
+  table[[i]] <- data.frame (db=data[[i]]$V1, category=data[[i]]$V2, query=data[[i]]$V3, iteration=data[[i]]$V4, time=data[[i]]$V5)
+  table[[i]]$category[ grepl("ts_", table[[i]]$query) ] <- "select"
+}
+
+table[["test_results_1000.csv"]]$test <- '1000'
+table[["test_results_200.csv"]]$test <- '200'
+tables <- rbind(table[["test_results_1000.csv"]], table[["test_results_200.csv"]])
+
+# Give the chart file a name.
+png(file = "average_200_1000", width = 760, height = 570)
+# Save the file.
+# dev.off()
+
+# Plot the bar chart.
+plot(1,type='n',xlim=c(0,35000),ylim=c(0.0,700.0),xlab='Count', ylab='elapsed time [ms]')
+title(main = list("Behaviour"))
+lines(table[["test_results_200.csv"]]$time, type = "l", col="green", lwd=2)
+lines(table[["test_results_1000.csv"]]$time, type = "l", col="red", lwd=2)
+legend("topright", inset=.02, title="Number of tests",
+       lty=1, bty='n', c("200","1000"), col = c("green", "red"), horiz=TRUE, cex=0.8)
+
+# average for 200 and 1000 itrs
+means200 <- aggregate(time ~ category, table[["test_results_200.csv"]], mean)
+means200$test <- '200'
+means1000 <- aggregate(time ~ category, table[["test_results_1000.csv"]], mean)
+means1000$test <- '1000'
+means <- rbind(means200, means1000)
+
+ggplot(means, aes(x = category, fill = test, y = time)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
+  labs(title="Average for testdb and testdb_history (200 + 1000 itrs)")
+
+# average for 1000 itrs
+means_testdb <- aggregate(time ~ category, 
+                          table[["test_results_1000.csv"]]
+                          [table[["test_results_1000.csv"]]$db == "testdb",], mean)
+means_testdb$test <- 'testdb'
+means_testdb_history <- aggregate(time ~ category, 
+                          table[["test_results_1000.csv"]]
+                          [table[["test_results_1000.csv"]]$db == "testdb_history",], mean)
+means_testdb_history$test <- 'testdb_history'
+means <- rbind(means_testdb, means_testdb_history)
+
+ggplot(means, aes(x = category, fill = test, y = time)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
+  labs(title="Average for testdb and testdb_history (1000 itrs)")
+
+# average for 200 itrs
+means_testdb <- aggregate(time ~ category, 
+                          table[["test_results_200.csv"]]
+                          [table[["test_results_200.csv"]]$db == "testdb",], mean)
+means_testdb$test <- 'testdb'
+means_testdb_history <- aggregate(time ~ category, 
+                                  table[["test_results_200.csv"]]
+                                  [table[["test_results_200.csv"]]$db == "testdb_history",], mean)
+means_testdb_history$test <- 'testdb_history'
+means <- rbind(means_testdb, means_testdb_history)
+
+ggplot(means, aes(x = category, fill = test, y = time)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
+  labs(title="Average for testdb and testdb_history (200 itrs)")
+
+###################################################33
+
+table <- tables[tables$test == '1000', ]
 
 # by db
 testdb <- table[table$db == "testdb", ]
@@ -117,8 +185,8 @@ qplot(delete$db, delete$time, data = delete, ylab='elapsed time [ms]', main = "d
 
 ggplot(data=testdb, aes(testdb$time)) + 
   geom_histogram( breaks=seq(min(table$time), max(table$time), by =0.5), 
-                 col="red", 
-                 aes(fill=..count..)) +
+                  col="red", 
+                  aes(fill=..count..)) +
   scale_fill_gradient("Count", low = "green", high = "red")
 
 ggplot(data=testdb_history, aes(testdb_history$time)) + 
@@ -168,4 +236,3 @@ ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_se
   labs(x="time", y="Count") + 
   xlim(c(0,max(table$time))) +
   ylim(c(0,n))
-
