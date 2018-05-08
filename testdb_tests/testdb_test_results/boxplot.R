@@ -10,229 +10,297 @@ for (i in files) {
   table[[i]]$category[ grepl("ts_", table[[i]]$query) ] <- "select"
 }
 
-table[["test_results_1000.csv"]]$test <- '1000'
-table[["test_results_200.csv"]]$test <- '200'
+table[["test_results_1000.csv"]]$test <- "1000"
+table[["test_results_200.csv"]]$test <- "200"
 tables <- rbind(table[["test_results_1000.csv"]], table[["test_results_200.csv"]])
+# renaming
+levels(tables$db)[levels(tables$db)=="testdb"] <- "netemporální data"
+levels(tables$db)[levels(tables$db)=="testdb_history"] <- "temporální data"
+names(tables)[names(tables)=="db"]  <- "Databáze"
+names(tables)[names(tables)=="time"]  <- "cas v ms"
+levels(tables$test)[levels(tables$test)=="200"] <- "200 iterací"
+levels(tables$test)[levels(tables$test)=="1000"] <- "1000 iterací"
+names(tables)[names(tables)=="test"]  <- "pocet testu"
+names(tables)[names(tables)=="category"]  <- "kategorie dotazu"
 
-# Give the chart file a name.
-png(file = "average_200_1000", width = 760, height = 570)
-# Save the file.
-# dev.off()
+head(tables)
 
 # Plot the bar chart.
 plot(1,type='n',xlim=c(0,35000),ylim=c(0.0,700.0),xlab='Count', ylab='elapsed time [ms]')
-title(main = list("Behaviour"))
-lines(table[["test_results_200.csv"]]$time, type = "l", col="green", lwd=2)
-lines(table[["test_results_1000.csv"]]$time, type = "l", col="red", lwd=2)
-legend("topright", inset=.02, title="Number of tests",
+title(main = list("Chování"))
+lines(tables[tables$`pocet testu`=="200",]$`cas v ms`, type = "l", col="green", lwd=2)
+lines(tables[tables$`pocet testu`=="1000",]$`cas v ms`, type = "l", col="red", lwd=2)
+legend("topright", inset=.02, title="Pocet testu",
        lty=1, bty='n', c("200","1000"), col = c("green", "red"), horiz=TRUE, cex=0.8)
 
+#########################################################
+
 # average for 200 and 1000 itrs
-means200 <- aggregate(time ~ category, table[["test_results_200.csv"]], mean)
-means200$test <- '200'
-means1000 <- aggregate(time ~ category, table[["test_results_1000.csv"]], mean)
-means1000$test <- '1000'
+means200 <- aggregate(`cas v ms` ~ `kategorie dotazu`, tables[tables$`pocet testu`=="200",], mean)
+means200$`pocet testu` <- '200'
+
+means1000 <- aggregate(`cas v ms` ~ `kategorie dotazu`, tables[tables$`pocet testu`=="1000",], mean)
+means1000$`pocet testu` <- '1000'
 means <- rbind(means200, means1000)
 
-ggplot(means, aes(x = category, fill = test, y = time)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
-  labs(title="Average for testdb and testdb_history (200 + 1000 itrs)")
+png(file = "average_200_1000", width = 760, height = 570)
 
-# average for 1000 itrs
-means_testdb <- aggregate(time ~ category, 
-                          table[["test_results_1000.csv"]]
-                          [table[["test_results_1000.csv"]]$db == "testdb",], mean)
-means_testdb$test <- 'testdb'
-means_testdb_history <- aggregate(time ~ category, 
-                          table[["test_results_1000.csv"]]
-                          [table[["test_results_1000.csv"]]$db == "testdb_history",], mean)
-means_testdb_history$test <- 'testdb_history'
+ggplot(means, aes(x = `kategorie dotazu`, fill = `pocet testu`, y = `cas v ms`)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(aes(label = format(`cas v ms`, digits = 3), y = 25), position = position_dodge(width = 1), size=5.5) +
+  labs(title="Prumery trvání dotazu pro netemporální\na temporální data (200 + 1000 testu)") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
+
+dev.off()
+
+###################################################################3
+# average for 200/1000 itrs
+
+x <- "200" # pocet iteracii
+
+png(file = paste("average_",x), width = 760, height = 570)
+
+means_testdb <- aggregate(`cas v ms` ~ `kategorie dotazu`, 
+                          tables[tables$`pocet testu`==x & 
+                          tables$Databáze == "netemporální data",], mean)
+means_testdb$Databáze <- 'netemporální data'
+means_testdb_history <- aggregate(`cas v ms` ~ `kategorie dotazu`, 
+                          tables[tables$`pocet testu`==x &
+                          tables$Databáze == "temporální data" & 
+                          tables$`kategorie dotazu` != "select history",], mean)
+means_testdb_history$Databáze <- 'temporální data'
 means <- rbind(means_testdb, means_testdb_history)
 
-ggplot(means, aes(x = category, fill = test, y = time)) +
+ggplot(means, aes(x = `kategorie dotazu`, fill = Databáze, y = `cas v ms`)) +
   geom_bar(stat = "identity", position = position_dodge()) +
-  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
-  labs(title="Average for testdb and testdb_history (1000 itrs)")
+  geom_text(aes(label = format(`cas v ms`, digits = 3), y = 25), position = position_dodge(width = 1), size=5.5) +
+  labs(title=paste("Prumery trvání dotazu pro netemporální\na temporální data (",x,"testu)")) +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
 
-# average for 200 itrs
-means_testdb <- aggregate(time ~ category, 
-                          table[["test_results_200.csv"]]
-                          [table[["test_results_200.csv"]]$db == "testdb",], mean)
-means_testdb$test <- 'testdb'
-means_testdb_history <- aggregate(time ~ category, 
-                                  table[["test_results_200.csv"]]
-                                  [table[["test_results_200.csv"]]$db == "testdb_history",], mean)
-means_testdb_history$test <- 'testdb_history'
-means <- rbind(means_testdb, means_testdb_history)
-
-ggplot(means, aes(x = category, fill = test, y = time)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  geom_text(aes(label = format(time, digits = 4), y = 10), position = position_dodge(width = 1)) +
-  labs(title="Average for testdb and testdb_history (200 itrs)")
+dev.off()
 
 ###################################################33
+# boxploty
 
-table <- tables[tables$test == '1000', ]
+x <- "200" # pocet iteracii
 
-# by db
-testdb <- table[table$db == "testdb", ]
-mean (testdb$time)
-testdb_history <- table[table$db == "testdb_history", ]
-mean (testdb_history$time)
-# without select history
-testdb_history_exclude_select_history <- testdb_history[ testdb_history$category != "select history", ]
-mean (testdb_history_exclude_select_history$time)
-
-# by select
-testdb_select <- testdb[testdb$category == "select", ]
-mean (testdb_select$time)
-testdb_history_select <- testdb_history[ testdb_history$category == "select", ]
-mean (testdb_history_select$time)
-
-select <- table[ table$category == "select", ]
-# by select history
-testdb_history_select_history <- testdb_history[ testdb_history$category == "select history", ]
-mean (testdb_history_select_history$time)
-# by insert
-testdb_insert <- testdb[testdb$category == "insert", ]
-mean (testdb_insert$time)
-testdb_history_insert <- testdb_history[testdb_history$category == "insert", ]
-mean (testdb_history_insert$time)
-
-insert <- table[table$category == "insert", ]
-# by update
-testdb_update <- testdb[testdb$category == "update", ]
-mean (testdb_update$time)
-testdb_history_update <- testdb_history[testdb_history$category == "update", ]
-mean (testdb_history_update$time)
-
-update <- table[table$category == "update", ]
-# by delete
-testdb_delete <- testdb[testdb$category == "delete", ]
-mean (testdb_delete$time)
-testdb_history_delete <- testdb_history[testdb_history$category == "delete", ]
-mean (testdb_history_delete$time)
-
-delete <- table[table$category == "delete", ]
-# nrow() je rovnaky
-
-# rozpyl a smerodatna odchylka
-rozptyl <- mean (testdb$time^2) - mean (testdb$time)^2
+table <- tables[tables$`pocet testu` == x, ]
+mean (table$`cas v ms`)
+median(table$`cas v ms`)
+rozptyl <- mean (table$`cas v ms`^2) - mean (table$`cas v ms`)^2
 rozptyl
-rozptyl_history <- mean (testdb_history$time^2) - mean (testdb_history$time)^2
-rozptyl_history
 smerodatna_odchylka <- sqrt (rozptyl)
 smerodatna_odchylka
-smerodatna_odchylka_history <- sqrt (rozptyl_history)
-smerodatna_odchylka_history
-#median
-median(testdb$time)
-median(testdb_history$time)
+# by db
+testdb <- table[table$Databáze == "netemporální data", ]
+mean (testdb$`cas v ms`)
+median(testdb$`cas v ms`)
+rozptyl <- mean (testdb$`cas v ms`^2) - mean (testdb$`cas v ms`)^2
+rozptyl
+smerodatna_odchylka <- sqrt (rozptyl)
+smerodatna_odchylka
 
+testdb_history <- table[table$Databáze == "temporální data", ]
+# without select history
+testdb_history_exclude_select_history <- testdb_history[ testdb_history$`kategorie dotazu` != "select history", ]
+mean(testdb_history_exclude_select_history$`cas v ms`)
+median(testdb_history_exclude_select_history$`cas v ms`)
+rozptyl <- mean (testdb_history_exclude_select_history$`cas v ms`^2) - mean (testdb_history_exclude_select_history$`cas v ms`)^2
+rozptyl
+smerodatna_odchylka <- sqrt (rozptyl)
+smerodatna_odchylka
+########################3
 
-# elapsed time over query categories
-boxplot(testdb$time ~ testdb$category, ylab='elapsed time [ms]', ylim = c(0, max(table$time)), main = "testdb: distribution of times of queries")
-stripchart (testdb$time ~ testdb$category, vertical = TRUE, method = "jitter", pch = 21, col = "red", bg = "yellow", cex = 0.5, add = TRUE)
+# by select
+testdb_select <- testdb[testdb$`kategorie dotazu` == "select", ]
+testdb_history_select <- testdb_history[ testdb_history$`kategorie dotazu` == "select", ]
 
-boxplot(testdb_history$time ~ testdb_history$category, ylab='elapsed time [ms]', ylim = c(0, max(table$time)), main = "testdb_history: distribution of times of queries")
-stripchart (testdb_history$time ~ testdb_history$category, vertical = TRUE, method = "jitter", pch = 21, col = "red", bg = "yellow", cex = 0.5, add = TRUE)
+select <- table[ table$`kategorie dotazu` == "select", ]
+# by select history
+testdb_history_select_history <- testdb_history[ testdb_history$`kategorie dotazu` == "select history", ]
+# by insert
+testdb_insert <- testdb[testdb$`kategorie dotazu` == "insert", ]
+mean (testdb_insert$`cas v ms`)
+testdb_history_insert <- testdb_history[testdb_history$`kategorie dotazu` == "insert", ]
+mean (testdb_history_insert$`cas v ms`)
 
-# elapsed time over updates
-boxplot(update$time ~ update$db, ylab='elapsed time [ms]', ylim = c(0, max(table$time)), main = "update: distribution of times")
-stripchart (update$time ~ update$db, vertical = TRUE, method = "jitter", pch = 21, col = "red", bg = "yellow", cex = 0.5, add = TRUE)
+insert <- table[table$`kategorie dotazu` == "insert", ]
+# by update
+testdb_update <- testdb[testdb$`kategorie dotazu` == "update", ]
+testdb_history_update <- testdb_history[testdb_history$`kategorie dotazu` == "update", ]
 
-# elapsed time over selects
-boxplot(select$time ~ select$db, ylab='elapsed time [ms]', ylim = c(0, max(table$time)), main = "select: distribution of times")
-stripchart (select$time ~ select$db, vertical = TRUE, method = "jitter", pch = 21, col = "red", bg = "yellow", cex = 0.5, add = TRUE)
+update <- table[table$`kategorie dotazu` == "update", ]
+# by delete
+testdb_delete <- testdb[testdb$`kategorie dotazu` == "delete", ]
+testdb_history_delete <- testdb_history[testdb_history$`kategorie dotazu` == "delete", ]
 
-# elapsed time over inserts
-boxplot(insert$time ~ insert$db, ylab='elapsed time [ms]', ylim = c(0, max(table$time)), main = "insert: distribution of times")
-stripchart (insert$time ~ insert$db, vertical = TRUE, method = "jitter", pch = 21, col = "red", bg = "yellow", cex = 0.5, add = TRUE)
+delete <- table[table$`kategorie dotazu` == "delete", ]
+# nrow() je rovnaky
 
-# elapsed time over deletes
-boxplot(delete$time ~ delete$db, ylab='elapsed time [ms]', ylim = c(0, max(table$time)), main = "delete: distribution of times")
-stripchart (delete$time ~ delete$db, vertical = TRUE, method = "jitter", pch = 21, col = "red", bg = "yellow", cex = 0.5, add = TRUE)
 
 ########################################################################################################
 # krajsie boxploty
-qplot(testdb$category, testdb$time, data=testdb, geom=c("boxplot", "jitter"), 
-      fill=testdb$category, main="testdb: distribution of times of queries",
-      xlab="", ylab="elapsed time [ms]")
 
-qplot(testdb_history$category, testdb_history$time, data=testdb_history, geom=c("boxplot", "jitter"), 
-      fill=testdb_history$category, main="testdb_history: distribution of times of queries",
-      xlab="", ylab="elapsed time [ms]")
+png(file = paste(x,"_testdb"), width = 760, height = 570)
+
+ggplot(testdb, aes(x=`kategorie dotazu`, y=`cas v ms`, color=`kategorie dotazu`)) + 
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(0.2)) +
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="red") +
+  stat_summary(fun.y=median, geom="point", shape=18, size=3, color="green") +
+  #stat_summary(fun.data=mean_sdl, mult=1, geom="pointrange", color="black") +
+  labs(title=paste("Prumer, medián pro netemporální\na temporální data (",x,"testu)")) +
+  theme(legend.position="none") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+        axis.text.x  = element_text(size=16, face="bold"))
+  
+dev.off()  
+png(file = paste(x,"_testdb_history"), width = 760, height = 570)
+
+ggplot(testdb_history, aes(x=`kategorie dotazu`, y=`cas v ms`, color=`kategorie dotazu`)) + 
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(0.2)) +
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="red") +
+  stat_summary(fun.y=median, geom="point", shape=18, size=3, color="green") +
+  #stat_summary(fun.data=mean_sdl, mult=1, geom="pointrange", color="black") +
+  labs(title=paste("Prumer, medián pro netemporální\na temporální data (",x,"testu)")) +
+  theme(legend.position="none") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
+
+dev.off()
 
 # elapsed time over updates
-qplot(update$db, update$time, data = update, ylab='elapsed time [ms]', main = "update: distribution of times", 
-      geom=c("boxplot", "jitter"), fill=update$db)
+png(file = paste(x,"_update"), width = 760, height = 570)
 
+ggplot(update, aes(x=Databáze, y=`cas v ms`, color=Databáze)) + 
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(0.2)) +
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="red") +
+  stat_summary(fun.y=median, geom="point", shape=18, size=3, color="green") +
+  labs(title=paste("Porovnání výsledku update dotazu (",x,"testu)")) +
+  theme(legend.position="none") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
+
+dev.off()
 # elapsed time over selects
-qplot(select$db, select$time, data = select, ylab='elapsed time [ms]', main = "select: distribution of times", 
-      geom=c("boxplot", "jitter"), fill=select$db)
+png(file = paste(x,"_select"), width = 760, height = 570)
 
+ggplot(select, aes(x=Databáze, y=`cas v ms`, color=Databáze)) + 
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(0.2)) +
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="red") +
+  stat_summary(fun.y=median, geom="point", shape=18, size=3, color="green") +
+  labs(title=paste("Porovnání výsledku select dotazu (",x,"testu)")) +
+  theme(legend.position="none") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
+
+dev.off()
 # elapsed time over inserts
-qplot(insert$db, insert$time, data = insert, ylab='elapsed time [ms]', main = "insert: distribution of times", 
-      geom=c("boxplot", "jitter"), fill=insert$db)
+png(file = paste(x,"_insert"), width = 760, height = 570)
 
+ggplot(insert, aes(x=Databáze, y=`cas v ms`, color=Databáze)) + 
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(0.2)) +
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="red") +
+  stat_summary(fun.y=median, geom="point", shape=18, size=3, color="green") +
+  labs(title=paste("Porovnání výsledku insert dotazu (",x,"testu)")) +
+  theme(legend.position="none") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
+
+dev.off()
 # elapsed time over deletes
-qplot(delete$db, delete$time, data = delete, ylab='elapsed time [ms]', main = "delete: distribution of times", 
-      geom=c("boxplot", "jitter"), fill=delete$db)
+png(file = paste(x,"_delete"), width = 760, height = 570)
 
+ggplot(delete, aes(x=Databáze, y=`cas v ms`, color=Databáze)) + 
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(0.2)) +
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="red") +
+  stat_summary(fun.y=median, geom="point", shape=18, size=3, color="green") +
+  labs(title=paste("Porovnání výsledku delete dotazu (",x,"testu)")) +
+  theme(legend.position="none") +
+  theme(legend.title = element_text(size=16, face="bold")) +
+  theme(legend.text = element_text(size = 16, face = "bold")) +
+  theme(#axis.title.x = element_text(face="bold", size=16),
+    axis.text.x  = element_text(size=16, face="bold"))
 
+dev.off()
+
+###################################################################################
 # farebne histogramy
 
-ggplot(data=testdb, aes(testdb$time)) + 
-  geom_histogram( breaks=seq(min(table$time), max(table$time), by =0.5), 
+ggplot(data=testdb, aes(testdb$`cas v ms`)) + 
+  geom_histogram( breaks=seq(min(table$`cas v ms`), max(table$`cas v ms`), by =0.5), 
                   col="red", 
                   aes(fill=..count..)) +
   scale_fill_gradient("Count", low = "green", high = "red")
 
-ggplot(data=testdb_history, aes(testdb_history$time)) + 
-  geom_histogram( breaks=seq(min(table$time), max(table$time), by =0.5), 
+ggplot(data=testdb_history, aes(testdb_history$`cas v ms`)) + 
+  geom_histogram( breaks=seq(min(table$`cas v ms`), max(table$`cas v ms`), by =0.5), 
                   col="red", 
                   aes(fill=..count..)) +
   scale_fill_gradient("Count", low = "green", high = "red")
 
-ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_select_history$time)) + 
-  geom_histogram( breaks=seq(min(table$time), max(table$time), by =0.5), 
+ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_select_history$`cas v ms`)) + 
+  geom_histogram( breaks=seq(min(table$`cas v ms`), max(table$`cas v ms`), by =0.5), 
                   col="red", 
                   aes(fill=..count..)) +
   scale_fill_gradient("Count", low = "green", high = "red")
 
-# histogramy s rovnakou y osou
+#############################################################
+# fareb. histogramy s rovnakou y osou
+
 n <- 3000
 
-ggplot(data=testdb, aes(testdb$time)) + 
-  geom_histogram(breaks=seq(min(table$time), max(table$time), by = 0.5), 
+ggplot(data=testdb, aes(testdb$`cas v ms`)) + 
+  geom_histogram(breaks=seq(min(table$`cas v ms`), max(table$`cas v ms`), by = 0.5), 
                  col="red", 
                  aes(fill=..count..), 
                  alpha = 1) + 
   scale_fill_gradient("Count", low = "green", high = "red") +
   labs(title="Histogram for testdb") +
   labs(x="time", y="Count") + 
-  xlim(c(0,max(table$time))) +
+  xlim(c(0,max(table$`cas v ms`))) +
   ylim(c(0,n))
 
-ggplot(data=testdb_history, aes(testdb_history$time)) + 
-  geom_histogram(breaks=seq(min(table$time), max(table$time), by = 0.5), 
+ggplot(data=testdb_history, aes(testdb_history$`cas v ms`)) + 
+  geom_histogram(breaks=seq(min(table$`cas v ms`), max(table$`cas v ms`), by = 0.5), 
                  col="red", 
                  aes(fill=..count..), 
                  alpha = 1) + 
   scale_fill_gradient("Count", low = "green", high = "red") +
   labs(title="Histogram for testdb_history") +
   labs(x="time", y="Count") + 
-  xlim(c(0,max(table$time))) +
+  xlim(c(0,max(table$`cas v ms`))) +
   ylim(c(0,n))
 
-ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_select_history$time)) + 
-  geom_histogram(breaks=seq(min(table$time), max(table$time), by = 0.5), 
+ggplot(data=testdb_history_exclude_select_history, aes(testdb_history_exclude_select_history$`cas v ms`)) + 
+  geom_histogram(breaks=seq(min(table$`cas v ms`), max(table$`cas v ms`), by = 0.5), 
                  col="red", 
                  aes(fill=..count..), 
                  alpha = 1) + 
   scale_fill_gradient("Count", low = "green", high = "red") +
   labs(title="Histogram for testdb_history excluding qieries: select history") +
   labs(x="time", y="Count") + 
-  xlim(c(0,max(table$time))) +
+  xlim(c(0,max(table$`cas v ms`))) +
   ylim(c(0,n))
+
