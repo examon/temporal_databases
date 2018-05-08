@@ -1,0 +1,7030 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 9.5.12
+-- Dumped by pg_dump version 9.5.12
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: 
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+
+--
+-- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
+
+
+--
+-- Name: temporal_tables; Type: EXTENSION; Schema: -; Owner: 
+--
+
+CREATE EXTENSION IF NOT EXISTS temporal_tables WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION temporal_tables; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION temporal_tables IS 'temporal tables';
+
+
+--
+-- Name: generate_deletes(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_deletes(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[] := ARRAY['purchase', 'customer'];
+my_table text;
+sql text;
+
+begin
+
+
+sql:='';
+foreach my_table in array tables
+loop
+sql:=sql||generate_deletes(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_deletes(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_deletes(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_deletes(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+my_ids integer[];
+id integer;
+
+begin
+my_ids:= array(select round(random()*1000)::integer from generate_series(1,size));
+
+sql:='';
+foreach id in array my_ids
+loop
+sql:=sql||'DELETE FROM '||my_table|| ' WHERE id = ' || id || ';';
+
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_deletes(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_inserts(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_inserts(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[];
+my_table text;
+sql text;
+
+begin
+with sub as (select table_name
+from information_schema.columns
+where table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+group by table_name
+)
+select array_agg(table_name::text) from sub into tables;
+
+sql:='';
+foreach my_table in array tables
+loop
+sql:=sql||generate_inserts(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_inserts(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_inserts(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_inserts(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+columns text[];
+
+begin
+with sub as (select column_name
+from information_schema.columns
+where table_name=my_table and column_name not like 'id' and column_name not like 'sys_period' and table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+)
+select array_agg(column_name::text) from sub into columns;
+
+sql:='';
+for i in 1..size
+loop
+sql:=sql||'insert into '||my_table||' ('||array_to_string(columns, ',')||') values ('||array_to_string((select array(select ''''||generate_value(my_table, unnest(columns))||'''')),',')||');';
+
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_inserts(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+tables text[];
+my_table text;
+sql text;
+
+begin
+with sub as (select table_name
+from information_schema.columns
+where table_schema='public' and table_name not like '%history' and is_updatable='YES' 
+group by table_name
+)
+select array_agg(table_name::text) from sub into tables;
+
+sql:='';
+foreach my_table in array tables -- return table?
+loop
+sql:=sql||generate_updates(my_table, size);
+end loop;
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(text, integer); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(my_table text, size integer) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+columns text[];
+
+begin
+with sub as (select column_name
+from information_schema.columns
+where table_schema='public' and table_name=my_table and column_name not like 'id' and column_name not like 'sys_period' and table_name not like '%history' and is_updatable='YES'
+)
+select array_agg(column_name::text) from sub into columns;
+
+return generate_updates(my_table, columns[ceil(random()*array_length(columns,1))], size, null);
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(my_table text, size integer) OWNER TO lukas;
+
+--
+-- Name: generate_updates(text, text, integer, integer[]); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_updates(my_table text, my_column text, size integer, my_ids integer[]) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+sql text;
+var text;
+ids text;
+id integer;
+idtxt text;
+
+begin
+
+if my_ids is null 
+then my_ids:= array(select round(random()*1000)::integer from generate_series(1,size));
+end if;
+ids:=array_to_string(my_ids, ',');
+size:=array_length(my_ids,1);
+idtxt:='id';
+sql:='';
+
+foreach id in array my_ids
+loop
+if my_table = 'category_product'
+then idtxt:='category_id = '||id||' and product_id';
+end if;
+
+var:=generate_value(my_table, my_column);
+sql:=sql||'update '||my_table||' set '||my_column||' = '''||var||''' where '||idtxt||' = '||id||';';
+
+--'from generate_series(1,'||size||') as generator) '||
+end loop; 
+
+return sql;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_updates(my_table text, my_column text, size integer, my_ids integer[]) OWNER TO lukas;
+
+--
+-- Name: generate_value(text, text); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.generate_value(my_table text, my_column text) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+declare
+my_type text;
+begin
+select  /*case 
+when data_type='character varying' 
+then 'varchar('||character_maximum_length||')'
+when data_type='numeric' then 'numeric('||numeric_precision||','||numeric_scale||')'
+else*/ data_type
+--end
+from information_schema.columns
+where table_schema='public' and table_name=my_table and column_name=my_column and is_updatable='YES' into my_type;
+
+if (my_type like 'character varying') then return (select array_to_string(array(select chr((ascii('a')+round(random()*25))::integer) from generate_series(1,ceil(random()*20)::int)), ''));
+elsif (my_type = 'integer') then return round(random()*1000)::integer;
+elsif my_type = 'timestamp without time zone' then return current_timestamp::timestamp - random() * (current_timestamp - '1990-01-01 01:01:01'::timestamp);
+elsif my_type = 'boolean' then return random() > 0.5;
+else raise notice 'not supported';
+end if;
+
+end
+$$;
+
+
+ALTER FUNCTION public.generate_value(my_table text, my_column text) OWNER TO lukas;
+
+--
+-- Name: measure_exec_time(character varying); Type: FUNCTION; Schema: public; Owner: lukas
+--
+
+CREATE FUNCTION public.measure_exec_time(sql_txt character varying, OUT "elapsed_time [ms]" real) RETURNS real
+    LANGUAGE plpgsql
+    AS $$ 
+declare
+t0 timestamptz;
+t1 timestamptz;
+
+begin
+CHECKPOINT; --DBCC DROPCLEANBUFFERS; DBCC FREEPROCCACHE; v sql 2016
+t0 := clock_timestamp();
+execute sql_txt;-- queries
+t1 := clock_timestamp();
+"elapsed_time [ms]" := 1000*(extract(epoch from t1)-extract(epoch from t0));
+end;
+
+$$;
+
+
+ALTER FUNCTION public.measure_exec_time(sql_txt character varying, OUT "elapsed_time [ms]" real) OWNER TO lukas;
+
+SET default_tablespace = '';
+
+SET default_with_oids = false;
+
+--
+-- Name: category; Type: TABLE; Schema: public; Owner: testuser
+--
+
+CREATE TABLE public.category (
+    id integer NOT NULL,
+    name character varying(100)
+);
+
+
+ALTER TABLE public.category OWNER TO testuser;
+
+--
+-- Name: category_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
+--
+
+CREATE SEQUENCE public.category_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.category_id_seq OWNER TO testuser;
+
+--
+-- Name: category_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
+--
+
+ALTER SEQUENCE public.category_id_seq OWNED BY public.category.id;
+
+
+--
+-- Name: category_product; Type: TABLE; Schema: public; Owner: testuser
+--
+
+CREATE TABLE public.category_product (
+    category_id integer NOT NULL,
+    product_id integer NOT NULL
+);
+
+
+ALTER TABLE public.category_product OWNER TO testuser;
+
+--
+-- Name: customer; Type: TABLE; Schema: public; Owner: testuser
+--
+
+CREATE TABLE public.customer (
+    id integer NOT NULL,
+    name character varying(100),
+    email character varying(100),
+    password character varying(100),
+    active boolean
+);
+
+
+ALTER TABLE public.customer OWNER TO testuser;
+
+--
+-- Name: customer_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
+--
+
+CREATE SEQUENCE public.customer_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.customer_id_seq OWNER TO testuser;
+
+--
+-- Name: customer_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
+--
+
+ALTER SEQUENCE public.customer_id_seq OWNED BY public.customer.id;
+
+
+--
+-- Name: product; Type: TABLE; Schema: public; Owner: testuser
+--
+
+CREATE TABLE public.product (
+    id integer NOT NULL,
+    name character varying(100),
+    cost integer,
+    amount integer
+);
+
+
+ALTER TABLE public.product OWNER TO testuser;
+
+--
+-- Name: product_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
+--
+
+CREATE SEQUENCE public.product_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.product_id_seq OWNER TO testuser;
+
+--
+-- Name: product_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
+--
+
+ALTER SEQUENCE public.product_id_seq OWNED BY public.product.id;
+
+
+--
+-- Name: purchase; Type: TABLE; Schema: public; Owner: testuser
+--
+
+CREATE TABLE public.purchase (
+    id integer NOT NULL,
+    date_time timestamp without time zone,
+    customer_id integer,
+    product_id integer
+);
+
+
+ALTER TABLE public.purchase OWNER TO testuser;
+
+--
+-- Name: purchase_id_seq; Type: SEQUENCE; Schema: public; Owner: testuser
+--
+
+CREATE SEQUENCE public.purchase_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.purchase_id_seq OWNER TO testuser;
+
+--
+-- Name: purchase_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: testuser
+--
+
+ALTER SEQUENCE public.purchase_id_seq OWNED BY public.purchase.id;
+
+
+--
+-- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.category ALTER COLUMN id SET DEFAULT nextval('public.category_id_seq'::regclass);
+
+
+--
+-- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.customer ALTER COLUMN id SET DEFAULT nextval('public.customer_id_seq'::regclass);
+
+
+--
+-- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.product ALTER COLUMN id SET DEFAULT nextval('public.product_id_seq'::regclass);
+
+
+--
+-- Name: id; Type: DEFAULT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.purchase ALTER COLUMN id SET DEFAULT nextval('public.purchase_id_seq'::regclass);
+
+
+--
+-- Data for Name: category; Type: TABLE DATA; Schema: public; Owner: testuser
+--
+
+COPY public.category (id, name) FROM stdin;
+87	lolynzekhy
+4	nmpwzoso
+159	eepyigxcfszeaa
+76	vnadvccmkpooxw
+100	chqochza
+109	aslledlous
+101	htqdaazrdleozl
+88	lufsbzta
+126	kwpsovfh
+116	worhckrt
+83	drdhaelnwollfwm
+86	vdhorxv
+17	fxivnpn
+50	qlkvcptiug
+36	fcymfsrvrkdzb
+22	yaepjp
+121	yfsptnc
+73	vlaailku
+66	ibtbcpu
+18	dpculhj
+152	xpuyofqudpqpks
+21	pyngnocpwosfale
+49	dinqkzdafgten
+31	sqmkw
+8	tcigvcky
+106	bheiigplyqr
+52	ovmyxjoq
+48	cgvoiybrar
+158	mfgyzgoldciq
+60	jbuiklkya
+41	hqgqqirzk
+5	apyogpebnewgj
+51	efdypzhgki
+75	bkxgrvkypnk
+94	oitiozgocj
+29	vdzwfm
+110	vuurfqegsw
+80	atmlqnwhbz
+148	lvjxklytjaco
+163	galmzmw
+95	tlviygyroya
+141	nfysxkemfnwj
+55	tzokl
+157	gipfvcjjqmzguy
+77	onbzsdce
+62	jopzgbjmcrw
+143	vdhxnsgk
+32	vcjoibyhjowvp
+64	sjavumdrn
+111	thcbjobalc
+61	yrqypjrvnivihf
+34	fcmuqq
+63	llpakecqklifnuo
+28	zjrdrtkbsgx
+89	dtvhhoer
+23	axptmhhyphc
+30	szfzccpbpectjf
+33	zrfkgfazulmfrqk
+160	kamaicoryvj
+71	ynmvpuefkwv
+12	qxygfj
+105	ouznuzugjnc
+161	erqdjqcl
+133	dabrpjyxowcwd
+16	pamdqbnw
+108	zlmllqx
+47	qznwbllogl
+117	acipicu
+14	sjuxvvh
+127	rcecrln
+20	llbstuhzycyvj
+145	rbodphwqy
+104	knlvksywvg
+35	rsuwoz
+132	hlkdyaa
+82	xkezvjdmlpghvq
+2	ecnzxzkr
+164	oeznym
+91	zrayxywt
+153	akgncrzo
+68	fgjfco
+134	pzsnqx
+150	yicozhwu
+138	zeggcvwpwhuqvu
+154	wfedtacvdojpnrb
+19	ndxlkvz
+140	fcvvig
+93	kyesyedxlihufu
+6	ervksdal
+24	snbyiyebfga
+147	uamhp
+156	xmtspqntobtowp
+129	mutvaynfbnxujr
+3	ehmfuenwibqpum
+119	bbgiibkilrags
+11	faitmdwslat
+135	xeuipevzyhj
+98	rzmdzerczt
+155	hubrmzxa
+7	rsqgybbq
+125	sgoyfl
+102	dbdhudboem
+44	byaayrihnjta
+112	mglsvghl
+128	cqohharzh
+166	yvgxvqaairkns
+165	loyfevpab
+144	tuyeojrbsxwkdm
+139	odfiqvryklg
+115	eoflakytakqa
+25	ailbdqgl
+39	teoahw
+78	klmdmzmkce
+37	lwitccgkpxdmhjk
+103	vgrpy
+107	wxvtwzxenc
+13	jjthfdmd
+142	bibpwdrjiexww
+122	lbioicwidhur
+96	kyvrcvzk
+69	fnjyocvkvw
+146	lhfbuo
+90	bxcydyeyzdx
+124	bmeebaqohmp
+81	gzmtrdpuora
+65	udwzbdwmcilez
+70	birfyykvjkwzh
+136	wxnqsk
+67	mimypgkqqamlai
+268	knqudiulvl
+181	hyjbx
+244	siosx
+288	rhukhlhzsqriqqs
+273	bmighuxarw
+189	oripyztqgfhvp
+194	iakrmwlrcgpdu
+223	gachglexqub
+241	mxrrtbkry
+272	dibpej
+228	kijzgncftgsygpj
+231	qkcpunslvtuuo
+232	jghrgwxuzyess
+235	gxyjnw
+238	ejtvpbvb
+219	pdkgv
+240	fzdolmvvipbmxg
+184	rlwglwlakfg
+243	ngxrtmfmgwtjs
+246	rxqrzzkqzunzvx
+207	fansyempzimcz
+257	yzcrl
+27	pppatmty
+236	bojyurhqhtvo
+312	khagizajngd
+131	ygmaqibzyofp
+260	noivduhpvgwmjb
+258	cpwryesgrxxcs
+263	sdzywwklds
+259	rlfavhwso
+216	qesfx
+262	kyexoybeng
+220	ikusgjjqkdmm
+294	velukzwwlzjlwe
+266	ivjhdjezbzwbk
+45	cwnvucnyl
+270	bsegqadfqyrunl
+225	pbxlcmtamtm
+287	avkbbvcvsbubk
+261	ccxsjlzvbztrqb
+280	nhbgktltpna
+323	eyzggcqupofijv
+200	drkclqhht
+295	keghttk
+175	nuinirpo
+300	hncoozxxlsxh
+290	rwmuhdbsqlm
+168	eflgb
+299	zzurljxawzktj
+218	hqanxk
+248	ndbqlcyegfwsiv
+195	agthgvgzgrrxr
+264	ryeozssfypmqa
+192	tpqtfzrlfqy
+305	kfvzlzrsht
+311	ijzjgcimdbpgp
+224	qfcgfnxgpobelwy
+314	agctclmxjoa
+208	zkrixyhfmiflxz
+318	erbtxubg
+320	ukohjsclivn
+321	ipligdrmlzbppr
+324	wjlaf
+322	emfvzkuruxj
+277	xstzovkwq
+43	cchpfvkij
+204	vhwvzbjem
+193	ssarhhgumj
+265	koxjfdofuog
+302	xwmugcsck
+201	ndltolrkj
+316	npcbydovugwvbz
+245	roiyvo
+254	xripodz
+279	bzmmkq
+171	mccxdrn
+188	lmggmdgs
+239	dtjsydczra
+226	ldyfye
+179	vsvvgccujbscra
+203	nlibbia
+292	fsdawksydzvz
+282	tqkthtqaast
+251	ecosiyx
+234	eqhrdsh
+310	eyryi
+205	yttsfuuoukc
+253	ozvhc
+301	ifkmqvncy
+185	wbvfvnjyxcmzlzj
+210	umoqdgnudccts
+252	kdodelpzmxkpy
+178	ggpahbdtvgekanu
+293	zazfpputtvjab
+177	jfzfkechyxohyj
+317	rvqnvyfdwucvcu
+296	vhulkbn
+303	zgihubjslkhki
+227	kzhgyjfzh
+313	vhdoudkxr
+271	ljlfptwejrq
+285	rvspcbuqeylv
+319	larphlw
+278	ixklo
+250	mmcnhygy
+213	khvclfuynpxd
+170	elnkmw
+222	hbgysbtdqt
+230	ksbgr
+173	kfvooej
+174	fkmset
+274	wflpsdnsbbvhz
+186	hgmfgkou
+180	wahgbrnuxrtg
+291	njzzatdpex
+212	dujatnhbiwxeh
+202	kfctcwau
+58	vgnqgpx
+172	szswbjdzcrhim
+199	dbefktp
+211	njdmaaprp
+256	wkpqyfma
+99	ywfcaxne
+169	gpvmf
+197	qfekwrhcoad
+217	ripxww
+284	nzjttykwl
+242	ioquu
+237	gcgzuwolcdigyt
+297	gnjnmfjmyzbwdr
+187	veffo
+286	qvvtlybqfga
+247	fhgafidokz
+304	zqiajkmobdhw
+74	obaxik
+182	aschxgayrgyapgn
+162	qffpobb
+176	kydvqchfjy
+215	tlmosc
+289	haltbgjapysygwq
+206	kralivpgr
+269	yiqcadi
+307	onoaxju
+267	nfektwbzv
+190	uyghkbtfidraif
+123	ozfwuqrsnepc
+315	ywafrunlqkx
+72	rvgwakklbllvkrf
+325	xszswjsme
+326	hwxrjg
+276	ijbucnxlkud
+330	jqxmgsnnlwedifw
+54	pmlhe
+46	ymxlcwpefgso
+130	svuburdkmgdt
+344	xfjych
+353	kaikibtkelf
+354	xuaydhuklpewbnd
+355	bdvnahi
+356	qhsidvmb
+357	phwxdsecacsdv
+358	cpscqinbok
+359	qsuemn
+387	qoqrm
+331	eavlpcari
+361	lfsqdad
+362	fvwhdjg
+363	uipckdws
+365	jjdtqk
+372	dqbwwuda
+373	ejyxx
+374	xeqlgajmlrae
+347	zwravwu
+391	sestb
+382	fackwbgzv
+383	fakwkuvnjgr
+385	qjhnibzervngqb
+392	lagoqgl
+396	gvauxivpeqnbfi
+399	pmytokuvuijvsx
+403	ptgtojkmzmmxx
+409	ubygbnodxhxx
+412	ssyfbjswhjxt
+118	imyoefgdc
+416	okjgzudujbengr
+370	dexbytdiwliepyb
+341	sbohdsdxdv
+424	aezyypplyn
+425	znsxqjimq
+398	dwrcymilkmvz
+397	djozagiexsbk
+427	lbwicfam
+375	rhnxrydyuuwv
+428	jtcna
+430	ohuqvqgvin
+431	xnrhrmjidadlzy
+455	wldrdtezgcryjsx
+434	qfkwy
+167	aecmigbpjncdrd
+309	akekmpjacmngaot
+10	wuitzxkyelghxs
+446	wqhvnfmthlozr
+442	vlaims
+468	mswjtoowxhx
+444	xudjtkr
+415	dsjukyrxq
+447	dtnapgxlywgbe
+448	ntzwim
+443	bodett
+42	bolvmirjs
+369	yiswycrzgzslj
+452	kvkqditgdn
+453	oxokcxcn
+393	ongnnilrgwclpur
+457	slzhqmotrqzrwej
+458	isztaszxor
+435	cvgzuufcnd
+463	mnfbpwwcaeljakf
+464	jdokgaomkhht
+465	mtaoucvmgd
+467	ursjtplp
+472	uodbcokkcw
+348	guxypnswhog
+478	pvuiosedsarn
+479	kdclmlkhlait
+400	kuvivmm
+1	yjhzu
+371	vihujnezwcix
+405	rdkavmgbijtrq
+368	mjjamaxkswzuad
+351	pdsroh
+328	zonjmjisu
+40	bwmhgvn
+364	thopwskqeosaf
+404	swkhkchsw
+450	ozzrg
+420	ckcknduqelemx
+340	xcydsjicp
+419	oofaiskvwzaza
+339	lbuorfq
+376	thbbxepmdwzwprn
+445	aqtmllpfztfshc
+456	yzbtjtodpgtmsr
+423	ftczoilnmbu
+378	bjkenzahghd
+476	mawrka
+461	lbvtnhccmg
+408	qnjfbbzdzlw
+402	qdcpodtpzbiy
+436	lzjxbrpsuaqgls
+432	rmxzs
+350	ymklboxz
+473	aixfwhfseho
+421	ezswyhk
+57	xlyqdqzopupq
+451	dseiex
+379	zynibhowftzas
+414	heeksj
+360	icyxfov
+221	jchdm
+333	gnowfaairaqho
+407	zszzyeomtsyofj
+474	fhwaofupwu
+441	xhobmsoyeujtdoo
+439	koygjoyykktefzw
+449	okgdmbrdgy
+469	lnhatmlqkbug
+346	rxouk
+390	jdfgra
+335	awlsul
+395	oqcqhhmx
+481	cpumgbxqoa
+332	bugltfpvbji
+422	wbugohsrmppfg
+342	aftryqgxhudlrb
+338	ermwaw
+367	xlcbepawjqr
+470	tfrfazhinccs
+349	dbmemsx
+480	fvdeamoujuludv
+329	jtjkuaybnweb
+401	ftyqfkhs
+418	ohmbajxepm
+471	jqnbbptdgzlt
+85	kjemwoaeqtc
+417	pstaeigedfsqi
+334	nvbjq
+482	iqbrxi
+433	idsrd
+411	dqzbanfznjwcqsu
+345	gqeoblqugx
+406	crgzyfpbnwt
+389	bktplhghnfbae
+413	cnezwtjst
+352	iexgostplrzhuav
+426	vukjh
+440	knckxlrotf
+336	ksuoivu
+343	hdsazihb
+437	voegkkjmftzqs
+386	tnztnyssgelan
+337	xfdpfejvmur
+454	sxancxxlwhrlor
+394	wgczkqmlrpb
+381	zlvst
+388	thhecmlm
+429	xjohofv
+460	nlctfje
+384	hlpaulacvtv
+486	pnruhparmarpre
+487	izmdqygzbtmuq
+494	lidjtgbpyyy
+495	plaaptxhjqn
+496	qeutprh
+501	xpujxcrnm
+502	pcwfbkkcdny
+503	eszvrnujhqe
+151	eemknbenim
+510	mpbktmouorn
+620	uzmrrfxqkjpo
+514	jbzqcshbuaze
+515	jkntcykgt
+516	npbccwvspepdub
+517	bhbdrgulcu
+518	xgdwoxetlirs
+84	dugclfsjtxs
+519	dnsqki
+525	xzxsayuu
+483	xeczqhleaokvpy
+572	jylwigqeywit
+528	aoaowewnekhl
+586	duhpe
+532	qqdeeshjpoppzr
+15	iorydd
+537	qwjlzw
+524	mifuobzaacxsh
+540	xqpodhmwqvb
+541	dwfhz
+542	lrxdwjprwvluir
+570	dgxqqvja
+549	lmzlbw
+539	tzdedfn
+534	xqeuowawfitcej
+553	sscjaqlusva
+556	wlqnrwsuqcqbs
+557	cjlss
+491	gnrrrvsjzmmd
+489	mdvhcetghopnsl
+438	olzdub
+559	zvxyvb
+569	lwxaet
+563	vgvfcbv
+565	cartcaee
+566	bxduoh
+567	fptjpsbw
+571	skgzloeuombaz
+533	ggleqnmfz
+573	iyeredqq
+575	hqtnf
+576	biqtrmgg
+578	auzmsx
+579	waaunjlmhe
+527	pdjin
+580	kggalwzatp
+561	aempoha
+581	exybktayf
+582	rhadokccq
+583	toyjvz
+507	uojesltdrz
+590	ciphmopqxhyz
+555	qkqybxzcysep
+585	ufwzd
+636	kypcmcrfc
+588	nqrfozjpejcxxp
+529	efcaqmmae
+523	izfxsvaewimf
+589	alvvy
+591	nivwfeasto
+593	aarbukoaelpo
+594	yyvjkphudqzcf
+552	leblrjxnmm
+26	xaplbiaklrtzzii
+600	dzwjr
+602	gtaita
+615	ggizctds
+605	aixqpfdxqemdgae
+608	mhhskwlipz
+604	rutthjivg
+609	fxhqldhhrpvgq
+611	yyfwzfwtmacuf
+612	okkxkcxzpgicner
+477	r
+616	qmtiezraifsosi
+587	eezeuur
+622	jkevswlfriix
+547	bhzdukkyjgapj
+623	pxuqy
+522	bskovrwptgvu
+624	vvsmluhbzwfcn
+626	latakgwcgfsebo
+628	eunqvg
+603	numurutywpb
+631	jcuqahkoae
+526	tavwtwnvuw
+59	jilibbwpgiib
+632	xthxsg
+633	mykcexx
+634	fmbqclbtg
+564	mojcvhb
+635	vsryhfcuxt
+627	xdukljf
+638	yjewnfnjuukyyz
+639	bukxqvpnyo
+466	licswcbzawxucsv
+497	yakdekpw
+521	xvzaowrzrsm
+568	scwlkzdrkebh
+500	egaipxwnjtp
+607	msjsislgwcqpw
+629	kbbdpjcgmyqyj
+617	gskykdiacmnk
+562	jzaycvrffi
+601	nqlysaljqmk
+546	shmlz
+137	fxwvmh
+149	sywpphxzzvmbvf
+506	nvexhm
+614	mhufqvtx
+493	xvpnnkgbpuxalu
+560	bursnkklwguiqj
+554	bncgayj
+577	vlskvj
+538	dxzvpzkfvqvw
+619	cmhcqkgfwy
+536	kxkdxo
+505	hsavnfsn
+550	rtvbbbzzvczf
+298	hzavftawxclaq
+597	ujodayvdfmlr
+520	jpgoukdmprlonu
+508	tbxlxmdjh
+492	mgsmevsthvtmwn
+637	rsishct
+558	sqjfdgsjs
+613	dfchhtlmixtbiuo
+499	bdjlienwsc
+630	scvkygodujvds
+504	vgzcidvvez
+606	apdovi
+574	ajrrsby
+97	ekoalycqnpeyp
+548	pifpnyxbyty
+596	lcsyysag
+543	tbjrtm
+535	kdjdrucpwlj
+545	vceslxiuwq
+509	mwgrlia
+488	rbvklzdm
+599	sfgzoouvk
+592	abhggbzvugjuvnu
+512	bwezfmrkdkqw
+621	furavxmcpiud
+490	xucknliaymzpsso
+584	knvqufibnsh
+595	rzuihn
+531	yloiebnz
+530	nhntnbpamlqn
+485	jmzijfqxbz
+498	ylcur
+513	hxawdnqx
+625	dxsyqsdqyrnw
+511	jpternj
+475	acnldjfawwybne
+640	drgbke
+641	mebasfpydgzcu
+642	otzwjqncmu
+644	hegwimdrf
+647	osxwkqbij
+650	pflzl
+652	ofgoeatl
+656	jkgnmyfaaexscv
+327	dfhbadgzlwvz
+678	abnfdwhd
+657	yeuzprrxe
+658	rxyhtxyzh
+662	oxysosz
+663	zhwrtmi
+665	joglxceasjo
+666	vomfnk
+661	kwrorgvb
+669	izpjcpxyho
+670	bfniz
+672	dizcrgl
+673	pprnqq
+674	jgmiiqzr
+675	nkhxuhyzbrmpcpq
+653	verpflfmfmuoz
+677	synzezmxvgnvm
+680	wdcodfsxytmqhj
+681	lkfcitinrwjxhzc
+682	jmmdudvpfrku
+683	zvdgjz
+684	buguj
+685	xbyqlpnetgfn
+692	bppuksax
+693	ptaecncsic
+618	eghusexinzx
+695	ulymnzpqgkphv
+696	tzfjzmmbg
+697	ussswdca
+698	hmbnjzmylilhmgf
+702	zmjhohtjsapoj
+704	gicqondibfq
+191	jdcudwuzzx
+708	fiyoh
+712	gafwtmufovfle
+713	ignkgnqmw
+714	uxgvjfntrgsz
+715	wmxbbkk
+716	uxmouubjbxiiopl
+643	ewobqgsjqfpgg
+720	kqgbplcrf
+722	qpfdedwmwn
+724	wfffivlshuqru
+709	rsuwgvlwyqey
+728	mnulbz
+731	yqrmk
+717	btudgiuxk
+732	orktpkijnw
+734	cgstqbdhwj
+735	sysckaslsga
+736	cxsccuktv
+380	ifwypgsegxhh
+726	gksdbf
+740	hxgpn
+742	cicejsfgbkx
+743	qqxcswkskry
+748	xvkfzpm
+750	sukrzyzfgd
+651	svqggkqblf
+660	fkqspeilxmw
+753	deoezrvxmotx
+755	njvdxtc
+760	dwvwkfelkl
+763	kxrthnyjquvmosi
+764	ntyhmtwrikv
+765	muruhbih
+767	exizfowaztmhmnc
+769	wtgannh
+770	mtwra
+771	tmoopftsvwo
+762	wpbekpqyibsk
+772	emwkiqdtwz
+719	mtlmfn
+544	xpbradmuugnys
+773	aurwakcvu
+774	kneujrgzj
+775	pdzdjmcqdabw
+776	zsvmdqatp
+777	jxdwv
+779	sgelnlsyyqhhfm
+752	tiuhshrn
+780	kgfsevrjzhe
+781	wdololkef
+766	eykmicfimy
+377	ujmiiawlxbbb
+782	haujpnodrfssvaq
+783	zkjjqcsyarhknvi
+787	zjzwxwkmy
+788	dllecjx
+789	dpmtxdh
+645	athfid
+791	blquugyozfntxqh
+706	tcinzihtvx
+792	lthwuttjbuxl
+793	xhdvy
+794	ulsderdtqhgkjm
+711	pdfue
+679	unrjabphc
+114	xrtafbgfisuot
+797	viyblqsxsi
+798	iledyzw
+799	qptedahwiqdey
+802	auwhmuurxai
+705	qwglrucselrnvf
+686	nbxbrdm
+784	yqavs
+648	cswlcgdhurkxznp
+700	ydyyaop
+664	cijrvl
+688	auqlbd
+699	zfvorpqhkfhc
+786	tbuuw
+691	nntyvusydzauo
+668	quvuadcbzzzyzab
+729	awehki
+758	pkurgfvbr
+727	nbxhvhv
+721	ngvspvymqe
+746	xsjqb
+738	pvtpvanoewvdidt
+689	bhxlktgol
+676	khkopgjnpbehl
+723	bwchtlhzmkn
+739	kmcscbndfol
+690	qkpcsbtczkm
+229	lcbdoulvpqtkt
+718	jebzj
+756	gxsgjmr
+649	bblcivwzisbm
+655	ounlrfvsnxb
+745	ysbhmmvk
+800	soqqbizhc
+796	gsxcrlcmobtrav
+801	jryzfbai
+113	jvevgls
+757	uqczdnerdqci
+751	cirztwoekamynmw
+725	lvlilhcp
+694	xdcpylmlowmdzfe
+741	stbksvnfmyujn
+778	ylakuohewryb
+790	gxhkq
+730	xcevayk
+659	phxvchnasoyf
+687	bgcecyezzbnibz
+737	rregeuauczv
+710	ardgsapjhyvk
+754	yjjodu
+768	pvzqjazbb
+747	jbpgkhaoftpdpt
+707	kkqjffbarpeml
+749	tctqahcsw
+744	meuhkmrznzsg
+759	izocpzngbiiwif
+785	izfbkxfhftitjes
+701	nuaapetppql
+646	goidncdlqkj
+803	llkspyvqjki
+804	qtrzdpymgym
+808	oozrrautc
+811	hzsosmc
+654	khpluhbtxygnr
+814	fqgpdvqihmt
+815	omnrr
+816	wojtyfq
+819	jfrebf
+820	myuczyslrv
+56	guocynfvjr
+825	xkvhxgwvygkwy
+826	fesesstzizrtkxs
+827	siargmfdg
+829	yzglt
+830	wiizzbmabhjqtqu
+831	kidmxe
+832	hytxfnjoax
+833	bglxdbyeww
+805	hwyaflew
+834	xxsfquhkeyytml
+835	zwokhihjerwwn
+837	wqewens
+838	wuvzdoe
+462	cghwaixhxtg
+667	wocnbeljyn
+818	xjrmr
+841	dkntywy
+842	zrxxzvmhb
+843	ypmnyrmav
+844	xzujtzicj
+845	pcufmmmolrwjy
+847	pefitsloxvhpe
+848	rtcxnutmpg
+849	oocxkxahytn
+850	tpsyjzabaexjzms
+851	etrkwyxuuotx
+822	wusmtzqe
+852	vbcccaxixs
+853	ynjackeoftr
+855	ycvczaeakpadq
+856	ixaivjvuj
+857	vorctqbehvinsbt
+858	sqeairmue
+861	seoqx
+862	buuakvi
+865	wijhrtqbybisua
+866	jusrjofog
+868	ejkrdrszem
+869	vmaqizltfkganzv
+870	hxyfaynd
+873	bkxqvfithwxvkv
+867	voxpw
+875	zcdypxgomkx
+876	daprajqakn
+871	gdyfrowq
+880	tzwpalugmwp
+882	wuumximv
+883	ljnufswxxsg
+887	vninirbhetkticd
+888	xsddrlav
+889	umnpmwrfdblqzks
+53	ixqhjbxwv
+890	mbpivuj
+891	fwynwwgq
+895	kerorsafkoh
+896	bfygc
+897	casvzstvhjd
+901	ukbjyyxc
+902	glfrcfogdufw
+903	qdkeehvbd
+904	fcijwxx
+905	seffhygnptuddh
+907	ppxvlmwfnf
+817	rklrhr
+908	gdbzb
+821	chciqyxhuudpym
+909	ldyrxbycblmbw
+911	kvrhjtxfqqfjps
+912	sjmtmswfbhtvsu
+914	lzrpblv
+915	qajbyabvfsp
+916	mrqmrookmephcc
+917	fmbzrnoqij
+918	tsbsthsjrwglh
+919	yklolkf
+920	gaugiqlybflyhv
+921	zpdvjaslj
+922	khlsotdp
+924	bxjfiw
+925	ywotooouia
+863	hvkwbx
+929	ttybhrifh
+930	oawzmftdaci
+931	cxthpedgixf
+932	lkkhzkuvfmnr
+933	tnojtymaadgkwzu
+366	rutzyeiuiahojm
+934	yrabmna
+935	vkvckinbwammmj
+937	wtnjkhbjfyzg
+938	qilysz
+941	ruvzeddxftgrvuk
+846	qzgmsdpyyvibn
+944	wfkkqfyc
+945	kanimf
+947	yxqddcrusk
+948	ootegfcgqwyhcg
+949	bdeuoanofktgg
+940	adwvywocdfdiu
+950	zulypnh
+951	nryrqlczp
+952	uojhrf
+953	npqspp
+955	ybljsvvzho
+956	ommlrfzxxxeszdn
+957	vcisxopqisj
+958	zbstepu
+906	zawcsiqw
+959	iilhjdxb
+963	dovvdshh
+964	uutqssxrffxeiy
+910	kvxmimckzhbqd
+965	jrtliiiifoeoiyx
+899	ipmvj
+946	fokysbihpeyeg
+954	roaldmi
+878	iklgl
+893	cdoevq
+120	rukxxwxri
+923	djqkzfekuhn
+806	mfmwfbhfqbr
+943	sbbkoxw
+886	jiqbccwg
+936	puvvcqrco
+864	gwbvkyotti
+839	kkaemjajqzlkpj
+828	mhwwrjpsiuf
+9	dafdfqa
+962	obzzr
+813	dihqacj
+809	hsnpro
+898	oglkinnfknjldit
+859	xihvseikc
+854	jwleaysmwsqdl
+926	etzsi
+874	snwes
+92	opnuispyyyuuke
+836	qekdswsygkqlacf
+810	mwgmxxsz
+884	mcbyrj
+927	suwagm
+824	hgikolocwipafv
+885	lrynbcv
+812	tgpbayiugwx
+894	bryvazwxawbpqx
+928	rcpzklwh
+900	kjkmfxlmivwbg
+840	ltwyusqstc
+860	prcxqrlcwkn
+913	mtoyeseoqxm
+823	gwyxvm
+807	evymudwpuq
+881	nephqcogavcw
+942	cviaivtp
+961	ecxigqoqrtgth
+939	rwzmfvcn
+877	hmsnjxegbq
+879	spfou
+966	xxutmbgjmynofz
+967	gzgxe
+892	qoeoutuzarczu
+969	kkoupl
+970	sdnedsxc
+972	wpnmcmlqziqbsr
+973	ufclhq
+976	hytycvs
+977	jqocurtndmapye
+598	deyqjrrkuilmlw
+978	awkbhzjfchk
+979	iofqymso
+410	pfeitd
+981	jqavtcygbuky
+982	bjnjrhpfk
+984	tqgtvuhibzlliin
+985	buqbjwpipc
+986	spbsbxlc
+987	wfrcvp
+196	mlftagngxo
+38	ckejsmhbaz
+988	yapwzcfic
+990	vyejdnpnz
+991	ifxpoxy
+992	wbercjb
+994	wznnipve
+996	orjttryzbbqhea
+214	kdrqj
+998	ysjgfjcmcegrwic
+999	uqmstfmpktt
+1000	nriockx
+1002	ymxtbhljpprkfro
+1003	ytmkb
+975	aepyydcsfqt
+872	qipudgylolzx
+1004	dufszczwbueiqsr
+1005	uxsusxageevaj
+1006	nsvpiit
+1008	vhwmwmmsjxyg
+983	deraoaqilz
+1009	orcusnkcrkd
+1010	iyvicbdxgmabr
+1012	wfadwlik
+971	thuyceglbtgvd
+1014	xmzhxz
+1015	pxzyvqq
+283	qyxadjlqwokbk
+249	ptmlfoox
+1016	qczrzpimnxxze
+1017	jkxnylva
+1018	spwahnza
+1019	qykpov
+1020	vswfllp
+1021	fipgnmhiqidof
+209	vcreouwmpvq
+1001	dcomkfd
+1032	dseykj
+1023	wtbsqbx
+1024	nxaeshgeflceib
+1025	naetynbydvyl
+1026	svidrcnzkx
+995	pfyrnmmenzmx
+1028	dhoiv
+1029	jfgrzyjwqyippdb
+1030	rlokezuc
+1031	qtudo
+1034	vaocwlzd
+1035	unvieh
+1037	hygjgk
+275	mkkkk
+1038	tqbtfobfxglew
+1039	hkcbukw
+1040	whwcpdjq
+1041	ahcspmdbafety
+1042	jwgttggrrko
+1033	kqolqu
+1043	tqfmvnowkwcv
+1044	qrwfk
+1045	gzbajaig
+1046	oskbxcdvv
+1047	ordqnvnt
+1048	jieyz
+1049	iuoqarbdt
+1050	mvcjzowhtzhfikq
+1051	qtxwbmfpmgdl
+1007	xjcsneoqpa
+1052	aaaltxrcsquvdjd
+1053	eqahduyzfonm
+997	bpimdou
+989	vxhyojuxjtaam
+306	erwruioh
+1058	pplvcyrgki
+1054	qxlsm
+1055	pwddkfwahl
+1056	ovjbyaleliju
+1057	spdklesec
+1059	zqymhrys
+1060	bjxbnqvmcu
+1061	efzejka
+1062	dukvkqdsewle
+1063	wkfnmf
+974	bccdpffradbrmbv
+1064	ajeinsfpstog
+1065	toozfdu
+1066	ncjbgkvqhv
+1068	lbeitmhntzv
+1069	kuzcsl
+1070	mrhnwf
+1071	mhzhimojqtctpbc
+1072	xagbjqlld
+1073	npoclgl
+1074	ooufoml
+1075	rbwhh
+1076	qhsmqcus
+1077	hveozj
+1078	yrmkqdnkds
+1079	pcnnjhnagp
+1080	tvmhtrumf
+671	glrxor
+1081	ewfsqvqllylkg
+1082	trrxxgpqgtii
+1083	nzhsxmulsq
+1084	tjnrvhf
+1085	kxhprwgyasghsf
+1086	exrbmgo
+1087	gqzlyrzlec
+1088	snsjzrszovbi
+1089	pjbpuh
+1090	veeptbsmooljxf
+1092	smghlagybl
+1095	nwutjvpawafktm
+1096	bgymbqoi
+308	cmhiclqbpvwfjp
+1097	khcbs
+1098	aawhqrcunt
+1027	etckezcywnfsii
+1100	ftekkg
+1101	xumjieprf
+1102	bpyjwrcchoh
+1103	lkqmbswvfky
+1104	hlofvzftfjxjnq
+610	obcqeeclywwt
+1105	uceifubuuw
+960	uucixnppukrde
+1106	ijwito
+1107	htosbuc
+1108	bvxwu
+1036	hhzisecxngxjhxo
+1109	epvfrmu
+1110	kgszcwwchrry
+1111	xfjaalu
+1112	qpdsbrm
+1091	vvgutbmxopavs
+255	yocznvlrozlbguc
+1093	nuygiolfd
+1113	zlvakuhmstvsir
+1114	mwsxpbtqzgzirkj
+1116	kcqcg
+1013	nwbvepuqazu
+1011	kgxpvwx
+459	qawnrxaycszli
+980	ilcds
+281	xikwwsnp
+993	cpmyqv
+198	ogidewmhqxkl
+761	lshmpdoyqb
+1099	aufugqyxf
+1094	tctzbfynh
+1115	vvann
+1067	fgvvyaalrvruody
+1022	taurm
+1118	ezzjuvcrvs
+1119	llvhdgq
+1120	plczbgs
+1121	fhmpydzr
+1123	ngghkv
+1124	nklznbc
+1125	imexmgbfbka
+1126	abxqahonqjd
+1127	pblqmwxylfefe
+1128	xodsfsdvaywsv
+1129	pqxgdmrl
+1130	fywjkofz
+1131	ouovq
+1132	ftptsxadbyf
+1133	woebxwu
+1134	szqznaiyry
+1135	xzodclkubyfsg
+1136	qmyog
+1137	xtpeonlise
+1138	uwvqd
+1139	cfawcaejwl
+1140	aybcuxnrxsauem
+1141	ndkgcfyhg
+1142	kakogcedfz
+1143	hngzagkobqbssmu
+1144	nzxgexjeqzub
+1145	navyxremos
+1146	plmhrvsfwma
+1147	tlouaoxrhq
+1148	wcclltccvzphew
+1149	fdjsplmn
+795	eqzvmwihhnyew
+1150	dmdthpbbj
+1151	eopdjbb
+1152	tknllnxagszjxr
+1153	snoqbla
+1117	lpjrzzyxlanlaud
+1154	ewakxsozjbn
+1155	mjvtnihfrt
+1156	giqbk
+1157	jqicpipsaumlv
+1158	sjvdxyym
+968	pgktnsdncnxqt
+1122	myohljwez
+1159	adxrqktnh
+183	rrjhxmqi
+1160	fxgclqtdae
+1162	xbdhfti
+1163	dldzdzwdvgcgdu
+1164	htjeoiniagk
+1165	wroargql
+1166	phzfyqdyvqsepp
+233	ainuylilv
+1168	rzgahehrwqhde
+1169	ytxxqzhlxysofs
+1170	yuzqhdndbbxul
+1171	quvrxow
+1172	drmpmhev
+1173	alavuqfncceafx
+1174	tjhtnbccw
+1175	vqefktyf
+1167	vpxzowlg
+1176	lzdrqgjelznirg
+1177	ezvrpzo
+1178	dusrstkofa
+1179	fyfphx
+1180	szesooakz
+1181	smnsxpuelmyouy
+1182	ehfziufnh
+1183	hyxelfnxd
+1184	ndpjbnafwn
+1185	wnggwrayu
+1186	dcjfqtnppjtzs
+1187	phavvnrpi
+1188	pkhlgrsrq
+1189	lgohrhfpah
+1161	bstxebpyll
+1190	bkgfegjy
+1191	adqefvls
+1192	kmzwvupzcoms
+1193	ftluxrmdacpfwf
+1194	lzsfxfnndjgpkt
+703	wzblfocdehlu
+1196	orgkfyujwplcgj
+1197	movgtqkrqnrakk
+1198	zifrdb
+1199	krhhkvrxeed
+1200	namabxyxrmoz
+1201	rmsarozm
+1202	ogkyuuqcenvvowk
+1203	yloowkn
+1204	tundyuvosi
+1205	vootp
+1206	qacxeegwlnda
+1207	lmjpuljnykxlt
+1208	xknovrqixcf
+1209	ysyydyhazcegz
+551	xoooblhzyucug
+1210	fqzmssxjlnv
+1211	ofwum
+1195	maxjfj
+1212	gezussl
+1213	lqenrmp
+1214	lxahcoellla
+1215	tvfgzaoice
+1216	ainohbxegkol
+1217	iugvm
+1218	zwsjdhpdghfl
+1219	srvbhbzedqdt
+1220	qaklozjg
+1221	ublgkjdkps
+1222	grghpasaanic
+1223	xiipas
+1224	skvvostkazslxvr
+1225	bjctqfifrk
+1226	yymnmbzxmvdb
+1227	yiolpv
+1228	zaezgnfqbhuylmj
+1229	ixyamkjrazhhb
+79	uavjgce
+1230	njdnu
+1231	hvfeedux
+1232	xstjoo
+2465	yayg
+733	nltiswqfuqhryv
+3699	lnldfpolurcifsqvsb
+484	aftgymovqmekwuli
+4934	feszhwcsxuyzepmgr
+\.
+
+
+--
+-- Name: category_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
+--
+
+SELECT pg_catalog.setval('public.category_id_seq', 4934, true);
+
+
+--
+-- Data for Name: category_product; Type: TABLE DATA; Schema: public; Owner: testuser
+--
+
+COPY public.category_product (category_id, product_id) FROM stdin;
+11	13
+2	5
+18	15
+5	12
+8	20
+18	14
+22	5
+9	6
+14	14
+11	12
+14	12
+16	32
+24	11
+8	29
+24	24
+23	28
+22	14
+28	1
+15	13
+8	7
+22	26
+24	1
+19	27
+35	9
+30	3
+31	37
+22	42
+5	23
+24	20
+12	6
+27	17
+23	23
+14	31
+2	43
+15	47
+23	18
+27	16
+43	7
+27	45
+14	30
+37	32
+46	3
+4	25
+19	47
+32	42
+25	24
+12	32
+51	55
+40	1
+25	40
+19	13
+30	37
+15	51
+56	4
+38	27
+20	27
+38	22
+50	5
+22	61
+56	63
+11	26
+44	27
+15	6
+2	22
+8	5
+44	1
+21	59
+20	46
+4	68
+76	80
+22	24
+59	62
+46	63
+44	3
+24	83
+36	62
+72	21
+60	49
+24	93
+72	11
+32	79
+13	60
+24	49
+52	99
+92	37
+18	66
+66	45
+34	19
+81	102
+47	22
+15	7
+98	33
+41	110
+5	28
+12	33
+50	118
+56	78
+103	94
+3	22
+100	65
+2	124
+21	119
+19	15
+5	44
+89	18
+42	121
+46	119
+81	22
+92	47
+105	76
+96	36
+21	127
+11	57
+6	85
+16	88
+101	36
+83	37
+81	33
+114	46
+35	61
+69	63
+92	51
+51	78
+73	53
+36	120
+25	76
+43	133
+59	102
+107	37
+80	29
+134	84
+22	41
+64	46
+127	132
+17	96
+23	20
+77	153
+60	77
+95	48
+15	79
+106	50
+97	142
+6	11
+80	93
+3	85
+116	151
+91	100
+43	131
+2	66
+18	85
+105	2
+146	110
+87	135
+21	134
+122	112
+111	50
+110	119
+104	49
+155	100
+80	164
+51	105
+92	135
+154	14
+100	162
+89	9
+114	77
+154	58
+151	58
+86	16
+15	136
+55	101
+42	62
+146	11
+51	91
+71	123
+173	102
+132	23
+151	167
+119	147
+46	32
+150	102
+162	16
+111	23
+89	50
+61	196
+120	122
+146	32
+153	103
+104	102
+34	43
+144	48
+60	171
+165	187
+12	92
+138	125
+100	153
+165	157
+41	163
+90	51
+10	4
+155	163
+135	45
+194	29
+136	102
+110	192
+15	5
+98	168
+89	116
+51	32
+99	143
+180	91
+200	68
+127	182
+111	143
+58	23
+153	9
+34	41
+134	26
+61	90
+63	176
+99	27
+121	123
+143	38
+108	24
+207	48
+8	152
+84	12
+156	203
+149	92
+135	1
+118	140
+63	239
+138	172
+144	27
+39	229
+150	60
+7	34
+223	70
+220	124
+206	93
+18	31
+5	83
+202	111
+218	39
+232	73
+217	207
+218	12
+94	5
+82	165
+231	136
+69	172
+83	115
+192	230
+241	53
+164	86
+30	74
+59	232
+228	26
+50	262
+204	258
+60	234
+221	144
+225	154
+142	29
+103	162
+216	69
+39	247
+72	237
+159	123
+201	86
+244	32
+34	270
+40	190
+149	53
+44	267
+26	277
+173	125
+171	249
+110	38
+75	142
+213	190
+248	75
+53	8
+181	5
+227	160
+124	291
+245	216
+130	296
+125	274
+85	110
+196	234
+75	179
+36	277
+141	199
+224	171
+30	72
+26	74
+132	299
+167	217
+70	120
+52	259
+150	230
+247	288
+68	176
+74	149
+48	2
+274	225
+273	106
+87	283
+92	186
+137	302
+80	229
+227	254
+31	10
+220	77
+197	284
+40	270
+147	79
+258	178
+189	103
+172	45
+275	148
+112	319
+251	303
+73	337
+1	277
+41	168
+209	113
+195	223
+148	247
+310	176
+82	295
+139	226
+255	278
+163	28
+305	85
+162	37
+5	303
+35	203
+12	205
+40	195
+20	192
+60	281
+112	176
+286	75
+299	323
+309	284
+248	4
+16	192
+317	115
+52	151
+9	333
+311	12
+25	45
+180	182
+67	44
+188	311
+153	354
+58	49
+181	216
+272	296
+296	177
+287	269
+100	128
+345	136
+138	17
+148	95
+68	240
+228	376
+287	52
+35	329
+103	360
+39	236
+312	214
+293	5
+115	354
+277	180
+301	323
+203	95
+353	263
+306	84
+316	39
+254	95
+98	375
+286	335
+86	258
+85	151
+60	185
+125	221
+233	384
+101	55
+296	126
+164	137
+42	168
+350	164
+265	390
+198	141
+338	398
+128	299
+304	58
+14	387
+305	89
+54	12
+233	67
+109	57
+328	408
+278	124
+265	304
+380	116
+208	274
+371	417
+112	189
+137	10
+152	351
+73	46
+321	5
+297	225
+343	69
+167	397
+176	187
+130	199
+31	15
+384	239
+323	60
+236	191
+186	70
+332	199
+18	344
+297	374
+161	276
+337	60
+375	238
+203	163
+153	436
+367	100
+184	207
+38	45
+115	46
+310	301
+185	348
+430	85
+292	406
+150	201
+37	426
+92	156
+115	190
+211	175
+193	108
+165	387
+305	254
+407	66
+154	327
+141	60
+347	240
+412	217
+61	66
+119	131
+292	14
+335	95
+387	432
+3	351
+302	161
+13	174
+21	197
+62	223
+207	59
+41	372
+420	311
+23	175
+48	263
+30	410
+281	86
+104	347
+441	36
+253	397
+274	20
+286	189
+10	156
+9	246
+435	374
+237	435
+371	438
+456	183
+64	82
+301	238
+107	187
+198	425
+114	26
+247	55
+164	440
+89	441
+46	220
+44	179
+217	437
+37	216
+476	437
+362	199
+53	162
+105	466
+131	391
+106	295
+240	226
+372	11
+189	16
+379	33
+197	166
+300	365
+221	336
+104	163
+361	337
+209	446
+20	128
+82	6
+198	38
+392	371
+464	359
+462	322
+419	208
+236	77
+389	85
+85	443
+233	386
+393	506
+392	96
+485	478
+346	28
+247	50
+289	509
+101	346
+97	445
+335	352
+364	508
+441	8
+8	493
+383	293
+136	80
+86	53
+414	185
+386	230
+400	330
+273	14
+291	295
+275	408
+434	505
+85	83
+13	350
+483	122
+501	520
+481	183
+368	434
+133	468
+427	375
+391	285
+427	499
+204	345
+446	142
+304	353
+527	485
+428	354
+143	210
+402	384
+532	288
+107	384
+473	411
+394	11
+67	540
+196	531
+75	12
+230	376
+180	142
+173	427
+408	230
+54	521
+521	62
+385	177
+36	128
+546	500
+391	394
+369	306
+94	455
+105	161
+169	225
+404	110
+428	361
+170	462
+317	236
+227	525
+369	255
+50	260
+409	141
+406	13
+380	322
+72	119
+392	129
+142	356
+228	229
+346	198
+573	421
+188	261
+354	554
+163	496
+191	240
+318	197
+140	510
+154	139
+566	278
+397	239
+576	573
+100	578
+253	84
+597	120
+596	448
+199	305
+159	357
+80	390
+186	401
+456	343
+194	73
+573	3
+435	296
+239	377
+170	601
+607	528
+565	16
+553	174
+275	427
+5	148
+600	305
+473	471
+476	513
+251	617
+341	238
+26	273
+285	101
+146	452
+313	163
+489	207
+427	143
+275	401
+51	114
+4	265
+295	302
+171	601
+206	534
+431	427
+145	558
+454	185
+323	215
+363	73
+361	111
+627	138
+520	73
+473	109
+505	514
+403	156
+341	39
+213	649
+159	517
+288	501
+367	348
+406	294
+287	405
+186	251
+500	478
+451	535
+12	240
+256	352
+533	100
+416	302
+65	511
+442	642
+430	106
+608	32
+234	108
+477	414
+193	134
+143	667
+594	337
+398	217
+62	236
+423	598
+165	190
+515	620
+146	91
+119	478
+515	661
+101	510
+320	9
+477	595
+315	11
+99	452
+266	387
+509	41
+520	568
+14	384
+181	12
+69	343
+239	401
+95	509
+572	201
+466	362
+70	240
+109	689
+258	634
+358	617
+355	598
+270	127
+419	111
+519	572
+568	649
+636	681
+558	402
+396	660
+382	277
+256	514
+27	702
+441	683
+402	147
+57	152
+627	480
+654	99
+94	77
+668	615
+305	457
+61	382
+467	253
+232	402
+617	571
+728	717
+606	622
+390	461
+466	481
+195	232
+114	543
+129	328
+427	658
+362	324
+228	110
+191	653
+11	461
+171	671
+108	701
+702	386
+210	74
+64	607
+287	367
+387	730
+53	44
+302	593
+597	322
+255	487
+435	255
+94	705
+10	732
+430	109
+368	297
+301	700
+521	763
+632	550
+253	456
+541	113
+162	364
+225	94
+114	556
+224	400
+104	559
+162	697
+518	427
+712	26
+247	506
+105	315
+225	612
+374	47
+727	520
+254	430
+87	559
+587	246
+561	688
+198	760
+524	737
+335	722
+384	664
+613	387
+306	36
+350	494
+726	87
+23	471
+225	711
+520	481
+501	785
+674	509
+655	171
+366	704
+275	386
+342	331
+573	440
+290	274
+287	141
+604	763
+672	124
+615	775
+99	57
+473	671
+78	291
+337	321
+200	304
+169	87
+695	772
+182	470
+519	12
+290	765
+327	586
+690	632
+28	447
+632	51
+581	191
+63	297
+23	9
+163	811
+4	119
+255	85
+133	101
+714	248
+708	336
+532	319
+379	484
+31	580
+253	705
+792	31
+256	96
+18	96
+204	543
+186	444
+186	742
+813	754
+242	695
+762	235
+132	305
+603	653
+337	665
+567	612
+322	283
+447	611
+645	459
+166	153
+742	441
+499	289
+68	75
+206	800
+166	78
+716	508
+64	399
+708	188
+718	173
+665	594
+785	576
+752	497
+504	112
+700	1
+720	125
+85	69
+738	420
+125	590
+185	840
+68	565
+139	554
+85	466
+782	492
+246	651
+48	613
+243	49
+451	244
+47	435
+636	374
+251	592
+353	195
+380	151
+256	662
+815	776
+364	30
+158	90
+165	146
+822	121
+189	283
+678	676
+434	56
+321	330
+87	694
+369	611
+222	511
+389	659
+192	670
+485	34
+371	71
+70	35
+30	328
+273	643
+788	81
+564	787
+539	446
+149	256
+456	443
+609	304
+339	752
+64	159
+326	246
+389	28
+225	147
+458	2
+577	353
+391	5
+62	488
+468	280
+247	853
+589	137
+166	573
+176	340
+704	154
+351	764
+784	478
+4	66
+493	345
+353	499
+276	179
+381	583
+625	890
+421	545
+128	662
+61	694
+538	448
+710	199
+26	639
+674	888
+262	864
+291	384
+168	556
+511	260
+539	274
+134	503
+330	470
+831	800
+196	157
+454	497
+251	708
+266	434
+15	866
+447	544
+143	104
+206	117
+804	35
+479	496
+400	781
+66	671
+296	819
+910	499
+577	584
+200	252
+905	72
+82	108
+770	309
+322	331
+14	147
+169	372
+518	845
+423	762
+665	162
+516	380
+143	372
+366	908
+93	354
+650	606
+263	426
+597	720
+206	822
+17	200
+924	570
+766	374
+666	476
+300	412
+769	555
+374	838
+844	610
+584	908
+914	136
+714	105
+233	310
+658	102
+917	82
+418	820
+228	14
+406	589
+790	963
+822	502
+250	561
+192	866
+950	661
+411	163
+827	635
+608	39
+881	937
+195	485
+292	292
+948	896
+353	52
+291	988
+479	810
+240	672
+861	236
+652	717
+10	173
+113	176
+831	812
+636	470
+323	631
+750	970
+601	739
+712	651
+717	677
+901	44
+113	484
+490	891
+900	859
+700	246
+71	109
+972	19
+152	105
+775	684
+897	705
+57	659
+200	161
+139	599
+509	59
+793	667
+105	324
+700	6
+841	910
+650	961
+852	561
+197	63
+48	384
+972	288
+606	629
+729	331
+888	737
+188	772
+404	516
+827	228
+621	707
+901	170
+321	83
+26	812
+813	1037
+670	395
+376	240
+619	231
+288	571
+724	596
+807	26
+331	639
+681	77
+671	746
+85	104
+163	701
+285	536
+886	114
+961	875
+919	516
+528	253
+801	570
+579	1027
+1033	666
+456	805
+738	836
+181	1056
+504	197
+611	566
+314	609
+34	153
+628	360
+1008	375
+569	995
+665	975
+58	239
+761	270
+580	967
+159	741
+428	546
+825	487
+182	1069
+275	1085
+985	931
+950	802
+1012	518
+436	705
+1022	403
+441	199
+776	763
+740	887
+531	808
+841	371
+990	862
+1054	11
+485	693
+559	236
+980	115
+610	35
+286	4
+172	510
+670	45
+735	306
+756	466
+201	867
+843	103
+947	82
+328	283
+669	70
+942	401
+709	275
+616	142
+517	251
+90	746
+305	910
+556	500
+293	713
+104	1120
+353	712
+874	53
+899	308
+478	821
+149	231
+967	523
+754	363
+365	691
+62	1054
+296	1029
+1054	237
+829	1051
+994	737
+659	289
+358	619
+819	1
+976	763
+734	1021
+160	125
+1003	690
+432	827
+258	212
+706	852
+170	138
+917	584
+525	459
+757	911
+943	803
+286	298
+146	441
+705	55
+1105	332
+846	288
+964	1063
+599	660
+456	764
+554	290
+525	1081
+694	692
+406	964
+1050	830
+666	600
+651	746
+548	970
+599	1082
+737	822
+285	753
+621	253
+6	522
+809	656
+982	1087
+406	224
+1021	34
+766	463
+835	403
+632	1117
+362	1164
+719	601
+13	800
+1132	53
+689	977
+519	683
+316	782
+489	828
+423	256
+1142	194
+1020	167
+842	1162
+375	839
+358	179
+389	885
+1064	1000
+1160	296
+964	817
+365	363
+714	776
+910	754
+625	1115
+539	477
+1038	212
+239	1012
+598	578
+1123	329
+961	230
+1057	6
+451	661
+591	731
+410	1026
+591	476
+887	73
+67	694
+1111	989
+435	184
+126	983
+152	350
+897	445
+772	108
+48	385
+47	252
+153	80
+361	693
+622	364
+370	373
+558	326
+326	979
+676	202
+823	866
+409	1113
+1063	1064
+368	14
+959	332
+466	92
+745	949
+818	665
+422	499
+1037	879
+829	318
+82	821
+1124	536
+1178	79
+421	844
+692	1219
+377	510
+422	135
+1	558
+1026	625
+604	526
+851	254
+416	1163
+42	157
+199	809
+112	320
+990	431
+67	731
+38	635
+1	903
+553	41
+785	813
+750	1166
+362	712
+865	316
+662	222
+9	130
+198	647
+192	395
+899	943
+724	835
+909	373
+289	951
+\.
+
+
+--
+-- Data for Name: customer; Type: TABLE DATA; Schema: public; Owner: testuser
+--
+
+COPY public.customer (id, name, email, password, active) FROM stdin;
+82	mfhwy	dvcssfwkscofrh	gplsqk	f
+58	kbjfqbzhuordk	wvigixhmwhzx	gzfypqyqoweke	t
+68	ihybyzwr	pnwercqqf	gmgasprj	t
+21	qajnngmjw	dhxfebw	dmbfdcqjdrpsaxy	f
+109	refxjh	opqykiszoww	vnjqugilkn	f
+104	aifpvraafb	lrvbimbvc	laddtaur	f
+19	cogkcidjtrisx	vpperucfavnzetg	neajsjjumb	t
+45	xxsipbim	mwslreohck	ewzsjanl	t
+71	mojeaftpcv	bmvtiveatdonfv	dsbpcdfcqxbi	f
+41	ycyixmepmexf	fcviuy	baybxp	t
+40	yrvdfgpgdciogr	gpuxbryw	cmddt	t
+47	nchaqygdhzzo	zliqhi	aesopjvsdymmi	t
+92	vabavxyttm	hbmkigahzoqtzs	kpoluxgum	f
+54	ibuiec	tzcmzq	peoicnxfg	f
+110	tvhbu	uupolagxxf	redvmagmxy	t
+94	kmtltbogxt	mcelppvyvxjgtms	whkiox	t
+97	desdtmgko	pwzrzgtbkwqaygk	ajjbamlfao	f
+34	poanxjxre	zqlinodxuvisgdy	icskfsmnnbtwi	t
+15	weylzwidtwtsk	dbddqfcydwawxlq	bwjaupfxi	f
+48	vtqbocwnxptomk	tvttvxfpqdjx	fkaap	f
+9	eopqnabryabubo	bmclkaphwguoxuk	ysuhyfwnhcuq	f
+37	bfenzymlywd	vqwjfsdx	tttcythsxebdn	f
+105	fyvchnvmqw	tkimhdzumfbq	uhzxprqet	f
+57	goeoh	hejaj	pqahldpe	t
+51	hbbivjmm	kxyaponniv	nnntkvojeoawv	f
+89	lhexesws	qjccpc	ifidgftqcwg	t
+60	lzvskhctcaxl	djhlczepzgvd	mekdwodq	f
+10	ucxgyidohdzzcx	einnydcfs	njquicgwt	f
+90	wzesogxtpxr	rzofegcjw	cfxgoyfnpklppny	t
+66	ruafpk	silad	lbgzo	t
+64	ghjvdbb	powprzkuzutll	bwxlypkdoaxb	t
+100	trhdvyuzesafrv	snhtgoyzrxybw	qyxzy	f
+85	nwvvsdchsaee	onwxu	cuoxkcab	f
+79	wdngmsympwo	cheyvcgwylmje	tzmongy	t
+78	yyrqlw	qfeyjkgap	eqxdyaqxklx	t
+77	yxojnuvum	zzbzqp	riqbspestqia	t
+26	fqkie	vhcsuglbzo	gyjjymixbjk	t
+74	bszowysg	mcoibplqm	oxlaqasagtes	f
+5	agbhrpbfjqw	dzalhkbnpuxvrks	sqtqwms	t
+103	pxucy	xtnae	lgduhpkb	f
+70	yvadenqdsfuyzcg	hrphyyzcgocfrst	nvjajepytunqe	f
+83	criqg	xuhtawv	lceonprxnkrva	t
+53	btmatr	zuspvgfe	smzrnssp	f
+33	wzyquatetbtfwae	dqlowhacbbk	awlvwbutncna	t
+13	mudhrrgspbst	pjefwrudroe	pvhnkj	f
+95	rautyzlxbbkp	ikdcqe	dayqfhmnn	t
+35	zkjtso	tzjdgckpaflq	kdfrqmcwxsbqyb	t
+8	ehuomcpssccldq	wlhlppsjpmxwfoy	kgdvhnqxpx	f
+29	xuyvkmpvce	qgfxivitzk	zajvelhlvi	f
+63	ealmaosi	kmkdbg	iuskqxrg	t
+43	akbbebfppw	mwipcruvxf	akeddwxbfnj	f
+102	copcrfgx	dsbeevkehlk	gxjvryydzoc	t
+38	iqmvtfddny	zpdrnaefne	banxdbmuwytwo	t
+99	ajmfj	raoaln	kcqvya	t
+4	ytujxxkv	xlgbslz	xnglhijdf	t
+42	kfmaftkw	wcalsczgfojdypn	kzvprjnnzbddq	t
+46	gzucs	sjommuov	vrfjldxuhuwea	f
+16	gumadimrxmw	umpcdzztcoll	ljxen	f
+24	hfxnbubrlq	mgbsyof	yqhuplvbhz	t
+98	nnjcm	wweaouyqicannud	obmwosnsgfng	t
+12	gpdpljzmocqe	dehlhcdlvm	qpcaoh	t
+112	ndhtlixvel	dpeddmiwv	xckeipl	t
+107	aquak	tnyfto	kceda	t
+113	bejvuypyaqx	ejigoysrth	bbirgptkipo	t
+65	jswamihtzgz	doojbwrkmkczs	ldpkbfnaq	f
+14	grqxylkamkidal	xenygtekwcpsppo	zxphxdph	t
+91	egelshyjwym	xggmo	rtmkhlnqyf	f
+73	hsjapeouwlr	jijzbouk	hkbefygjonaqsv	f
+30	brokdbeaevsq	ewtvythncmnjsrw	ltyui	f
+6	hloxvbhr	jbcrupvwziezoy	uvsddewzodymb	f
+86	bhgoktkcmwfbfnr	nzwvonwwd	svikkorccsxxt	t
+44	tsuvdvnr	despvwz	tndpjyif	t
+11	izvylhj	tvolfhsmmtomyi	aysdrhozwaosxia	f
+84	grdmmmmb	kmobucgq	cxxrsbunmqbnqpm	f
+101	igzthojndp	lmbgoatsvk	cyufiligwyh	t
+87	kaafcfsjgwcmpg	afahkgea	pxulj	t
+61	uziwrpbjlhqnfj	ujahofpq	ldtvkjunshjife	t
+17	wrjvsshgomr	ynqsmcf	bfdfoo	t
+22	stgrpnug	zgtffldgte	icocz	t
+81	wqbxfdjmhln	pguoy	kawqqmdnd	f
+52	eqbke	klfotfpmsqwn	lhumvrxierwg	t
+7	ulpdnqcfqjzwlge	trxzl	empxczbkfot	t
+32	ejtcevrvpoc	qawdufhetqytl	pqtcadt	f
+23	reqii	enzgjzhhr	zktrz	t
+55	wntolthvyg	artrmau	khwqtr	t
+59	unexucbzhtp	zibotswyj	gcqzpnors	f
+69	rdxnjysqt	qgrelgm	zmeez	t
+108	drrkwhuyugdlec	cibkydt	mrgpgx	f
+31	hcdbdqhpvxc	dxhjixpc	irjaavjch	f
+1	mpspkh	ovcezsjjmdnxyv	sgvvryvwlxahjn	f
+39	jwuvzr	cfegkexnve	dobwuscvgm	f
+93	ahhlezvfzobyo	rfpyjtlllunwn	enipuoajgbekmo	t
+106	ckjexyhrhdigm	xoammasbkb	tuoyjfozq	t
+67	zxvpomtrvf	bkcshngt	afqmdubgawhikc	f
+114	jgsyveyhcitsif	ksvmdigfjunqrx	qlososxxrxf	f
+96	viifugxoufpjrrc	erjqxmdyziqhzp	mvfxooqsjx	f
+3	qrevfmxcvhkx	upzgcrpmxyto	chrmc	f
+62	wmofztsza	oaaikuf	hiiqk	f
+76	xepurkywcsyzoh	qpfnbcbl	xhxorcddr	t
+27	eyzepx	yxosfbah	qcepb	t
+20	nkpaiqb	jecpedmuyqavvm	hfdfh	t
+49	fnjuw	rrdbzz	rhvetc	f
+88	nblyophzhyewlan	harcqiwsarnaf	ichkem	f
+56	yhpja	clfjbcaqpw	unkurjemtqspuu	f
+50	rtlicyutbqzuhmx	ilpinzjxf	grbdghubsuewk	t
+111	gcwxnev	izbunmxpsun	axxmblefnm	f
+28	lqnchs	bbvoffo	kgeqlffdhfuq	f
+25	wvvzvgzyuxrxvv	ehkhvrfaweq	mwqcdhd	t
+36	mmfauhauyzwon	ogwuyh	aaurbw	t
+2	svcgxsjyhmz	hjsjdpo	aenktpank	t
+118	vndwkpyajpmc	wwqqazmiq	icqnkcxfcyrz	t
+122	twmozueuntgdmw	tfiwvwutuw	ldubdhhnyaejhuq	f
+130	fxwssuabulowu	ypvsqa	gemhmoqv	t
+198	pxtufdjdibzd	cynbq	qfupnfgtgmglya	f
+142	xupxhgxibdt	mzpqaxvwppicnv	isutlgdifxkyks	f
+201	mwnbyqelu	epodhjmvuc	dgwcnwnadad	t
+146	qvabvof	fzeqkb	fmqvhxd	t
+148	nodpafhicqb	gdszuoyap	qwbyiaobsiilk	f
+149	zqicmwjda	etcfpzdfsuh	doahkhzjyrqpp	f
+150	txrhehvhd	aetcztxer	ewqxzcpe	t
+144	xyghjcscm	sefygbpmrocua	yhyfizpasm	t
+128	fktki	uhigekyh	gpevt	t
+211	jtaibocjiwqkchb	kpzqzbi	uwrcxtxamziwnyt	t
+153	lmikxdloxj	hezlgn	bqaavdmjvqb	t
+154	chyjugxc	wqbjgnvx	joiwdnarh	t
+166	vrpvr	fygvmvfwylxeq	wpslsbvbgqreeju	f
+165	sxlghou	lngqhhlcynovb	fagxudpmqf	t
+169	hrpwcvardqklrnf	lyqmysolousinvt	jbyrqvwsbsvkfwb	t
+170	oazcubdogi	whvtyi	xmmyafxb	f
+200	kvmnoqppynrbsdk	esgqziflsqvz	rnlihtopk	t
+152	nhbjjrnrljv	ezwuin	ldbdo	t
+171	fvoozilectmklov	lpszor	fachm	t
+216	ycdsims	pkutujfy	kcwgusarrfl	t
+164	lkwhfw	khpvorekmj	gsfub	t
+173	fcyfimktji	wqarfm	obxnfwevrq	f
+183	ypososfuqhnbvob	nuzwwvdnukfrw	harrpsculsx	t
+175	zznerbsaaxl	imgdmwdiz	kwfrlralencnfn	t
+186	xddfl	sqsxet	ermdwja	t
+132	zriflkgnnkd	wcvbqkenaytfeq	rdonc	t
+193	xaccllas	oloixdqxpp	rqgll	t
+212	drmecjxlpghasd	txgvhrnkuezes	icawwbaw	t
+133	mfveimukqepq	viccywhsepaiwz	gnwkm	f
+135	truvinjvlgx	hnrdvjjzp	iamiviir	f
+184	vrijyia	ehssvnemn	dpkkyimnbsxg	f
+72	bffieovqmdwb	fyiaim	ctprmrfnqyuyjgu	t
+115	wamckan	yvyyn	ssama	t
+189	rqxvtflxczdjt	fptetshnjhfy	jwwzxeiu	t
+227	hztczyqscmob	swupjbwmhra	gqjiytztio	f
+203	amaxg	eisvom	kmfdvmfjoi	t
+199	fktjg	zayclanyapcr	kyhvdflixq	t
+80	qyqvywqouew	rjqjkfswouwegmv	ezkqvrgthbs	t
+178	tgbbovvb	mqqwbv	jrhjjedhgfr	t
+208	utbzomdgmha	kbgrds	xxydibimynnpxi	f
+213	pwiqoylm	skswqnmgmtfmiyu	gmsacbh	f
+180	xzotlyyomynle	bvzmspfj	ywzox	f
+140	uwgtnxt	qibln	vlasqgafzsyep	t
+137	xlkrhfsctvx	qdskgfhnbh	xemutglcxblj	t
+202	tplmpugsi	weqebhheu	lcxwxsqqexmhhzb	t
+205	wkqko	ygweytcqvfhnwf	oavjpzilj	f
+127	gnreeobgjmsb	gfngnopqaxlvfip	arkfhzfl	t
+179	dalmgq	yubstspaaz	krejoos	f
+141	vygjvihciobsi	iaklhh	csicaufsbjtr	f
+134	ouylgnwswaf	rtagkel	rgiwirutwy	f
+204	vegrslwxdn	dbcvcltfetmf	nvvnuz	f
+163	pcrawqrlpobm	dcapnfygsikv	huccxtgi	t
+181	oekfpymoqpg	bjohegawyvgfp	mnmvpzkbonbux	f
+195	kuhsybyuvpffi	vwbyfmlateyyph	piujnvs	t
+161	hrxvovix	rizuronx	hbnvo	f
+190	tqnefiehvs	oztzsjrnphqe	bqemhnxgons	f
+188	pqrkgtweccsue	vkwddgvoxlzz	vogvgqykyob	f
+221	zqvondj	fkcfkqbtb	heiopla	t
+143	vadwfaxjixvkq	tbbfbcththvzylw	hcrmeoixqutm	f
+185	ioglcud	kstrkdqmpvwcab	waxtsfcpbkkunl	f
+162	nbshofnsejpfymp	iodlrxrknudg	xlqtux	t
+197	ybbhklmensov	qhzmdaf	zkqbodbvfrcgw	t
+147	gjgrx	snggpdlbin	bjytrdgmkyo	t
+222	czvtosfdx	xrqajowqaij	rtagiwuunytyd	t
+120	culdsu	bzdanixmsqn	hffxtyg	f
+223	wtaflltvjz	uppgjcsmtps	erjtyq	t
+121	ofltkvpkgn	rsuhog	gnsbrwin	t
+126	jqvxagkijb	telinkwbxr	qwpmqxe	t
+209	wsnlqajmdigzk	cyfsnqlwm	hxjldihsvkw	f
+158	slerxapfglulgfn	uixmuakx	cqgquyhygdr	t
+206	viwkqi	xlvjm	vejyeqxp	f
+219	wcblbo	wqhbivlj	wrlojrz	t
+220	zzafw	gduvazlskow	lqgimpfr	t
+136	nodbzudrcnqbvpr	uhytl	vwvmqgem	f
+138	jvafhhov	jfiyhmicrdhdg	darereyxgxsnzr	f
+214	rdarfjktferd	mvxlvwcpwjtabl	dixattynecxjy	f
+160	avovuwe	ibhukhkjsgyspq	crkmz	t
+139	ovwpnvxzm	pcqjaejtzdn	ggjgdt	f
+215	ulqmoyyjvxd	xmrtinhyoj	ofhjvyfpaadra	t
+182	nmyvbjghg	taleeolltp	ncgbitwbhviaq	t
+210	sgxkqygxql	uwigfsc	witsmcw	t
+224	zzrgzpmovqcdzg	qzwkoqmvzity	jmztmtjtkzgfgye	f
+124	fqkjmzmaio	empctce	vkkiulfptkc	f
+167	ycbfvcgfhye	nnlayurkybo	gmkvtnaahclis	t
+156	igtqbigz	bxunohsinwqvs	litbyy	t
+217	flcjsdb	daprlgmwcfpep	thgdskyrm	f
+172	qgmneudakvgc	ukwqtg	xkolvhwdlf	f
+194	eaozn	tcastglx	nahlzkpfjqc	f
+125	msdkrgy	nltdmfov	iefmbqx	t
+177	sgmnicqqvhqvq	llpoddv	dlvhythhbrryrl	f
+226	ekdorncysmyq	tzbywslwnhz	vrcawnmhgypbpe	t
+192	tpgmux	afbbcgn	zowdt	t
+131	vjsvmwxeszewwlq	bxmnyd	bzfmtilwsjz	f
+151	wajyyppuictmxve	ncwtfblvb	zyszcbkblm	f
+116	kcwncpfwyajjvk	aubbbwuelslidn	alruho	f
+155	kujwszntyiyvpn	vwxln	lwxfmhtjejjywuz	t
+123	egyetm	yovrianxqcrrxj	mvqkhglxd	t
+129	spyfcidganwnkei	pztodjbbcunpu	tldeurfvgxufacc	f
+145	sdzsxihobs	iratpl	rugktozc	f
+119	kixupkidzz	tdeaykankrxf	eefsjyug	t
+207	oxhfzkyfk	gwoyurorftjywfu	yrodtotmq	t
+174	kmtkinvbpgcn	afkurksvievkqt	tiekysvyiexa	t
+218	isovckzk	ssqquzjvdyx	tqpzzohmbq	t
+191	ywdhgjfqqs	xsgdb	goslcdgyr	f
+225	vomthabrwetk	aieustytdtcprlu	vqtsajwhtqdfk	f
+168	scsvutszxcqqvg	izqpgcmbw	nljejlqwy	f
+196	stnnmmx	uikgkwbamd	rvkpbarca	t
+117	unodqbksh	ubfrwjn	puamsrxn	t
+232	uqgbicbqpufpkmj	zjtgdpyyza	ixgchczwtvgbg	f
+240	dlngd	wtmupchl	dwcdzq	f
+241	tgofux	uvwsl	skkbg	t
+242	pscgpblmv	abmawhdalzhxuos	qubkirdbpp	t
+339	wpyazcrbdhrpye	yebzy	kinjqjxuv	t
+250	ejhghyzxoz	elgmzajtkkmrjq	vitbdmcsyhzfmw	t
+254	yeshypxb	bngqk	peqij	f
+311	shlkr	rugje	kocsur	t
+260	fidphuffkogtsft	deiordokpqxbdlc	yqcelbrthql	f
+267	cfnarzry	ehzgyycynjiwgxw	qemuhkzchqwmzw	t
+238	uyjsiziapuxt	qnyqpc	lauvwvmka	f
+323	alxszgg	wemlpucunvv	gkthmkdwya	t
+271	rzavnffbnhjnguw	mmoxzlieuu	lzurf	f
+332	sdkkspxqlrzrfqy	piunsodi	iivekusduqmzti	t
+278	rockf	ttlczatcplzs	uoojqat	f
+281	xgrzo	iiapvxewus	vexej	t
+282	vgpnbdpwtj	xuevhpypa	fdwjlqbsyapxe	t
+285	emxxuexdoz	qbdvbe	lbloxxyipnex	f
+286	pucttiyrtbpanmr	gwybxgnxr	vcrpwyaqvqfvqvi	f
+288	oobtaoqeeezutd	yfdvpjwjxvworf	hfrfphbufouu	f
+326	wqsofkxequk	gajftfvwjvpy	cuqqy	t
+297	pyicgoxj	jmvsidytx	wpwewautzrjt	f
+300	bxoxtxc	hbvnab	oynyymmgkl	t
+302	anrnbqzvuycy	glmpm	dlyfvwp	f
+304	mgmztaegbyxecrf	xlkdbrwumoal	lpgpzzreqacx	f
+317	whttzoxodapfibv	wwdvfapkiwv	oswerwnmivurel	f
+306	gpnxpbtcplwb	vyisshhjf	sycnifprce	t
+307	szbbwpynqvjhr	oacnm	dfymzgrki	t
+253	gcpoecpkuwsvrm	fdudftzgp	wpsgbjsxljaepwy	f
+274	imtgvlkij	rjwbltlsvh	fbatrk	t
+312	drbzvhijqd	omwlcv	binzndbzue	t
+255	gnhuxvhj	bnmfyxio	knwtgpervd	t
+256	wkhluoupymnsxdb	cyiwlyrky	tsjulox	t
+324	cnlvbfx	aands	ntzikkf	f
+328	ockvgmrc	ulwbgsoccoqsswn	jpzfgijtkx	t
+228	ugnbzxjzbr	enbrqcx	rextokypyfvcj	f
+329	fufipo	rrlomwcj	dfipc	t
+322	wylmhxxjwwmoeef	olscyxyq	xgvputriugl	f
+291	wrgyzzmxcnu	fvefh	xtwqmthnayq	t
+336	viwyvijmk	qlplqpru	strswd	t
+273	ytjdx	xtqdj	ajquecyf	t
+294	bhhsbfdekv	jlvrfcph	ctddvnlbwrnudr	t
+275	ewtnsox	ydppxa	lndnyqof	t
+251	ftjseyidcdg	dbouausatpwh	xztrbbo	t
+289	bxtahrx	djxfsregbj	vcvcmpo	t
+276	kxwsyqplobauu	cpvqpgiw	onaletkraqjbxv	t
+270	jgqkijry	uksjbnykxqs	ldbcemvdsossfq	f
+309	esnxvjw	hjcbmjzkhy	frxslrtsdm	t
+231	pvbxbpsclplhal	sdnkmgcgduoviyk	jibmtvkv	t
+265	wzayyiimjy	zfnzcdusgtppjzt	gwrzaaxlbsgnje	f
+340	kydwdiaqgutz	efwgjog	hyznhuzzgoven	t
+313	yyqmqmbepl	wcrryh	vzmnd	t
+248	dywjqixjnexflba	exztadoppdalp	npkhp	f
+295	esfwzw	wphpjlcfhreuz	hlwsvdgg	t
+279	lsizaicjeckehjo	uljrvpdwgzmee	tjcuh	f
+230	aitphdbzedpctm	mdxcfwgfxvnp	oeclbncjns	f
+315	sucvkzxibfh	goyosynznm	mvfrkwgawd	f
+269	zeoiwbalvcket	cmbrt	grvdndc	t
+290	qnciujepv	tjpdgl	knthvbiuvi	t
+337	ltjmgcw	fkgvdmmxoofxxv	yylconirk	t
+258	jvxmmcwaiw	azwwmudgir	jhphjmpb	t
+261	llzfahu	edxdypqmlib	bwtvygkclqxbjt	f
+18	iwnhvjiqgwhoq	gxutqpwjqhmmvse	lruwcfjrrmefa	t
+287	alvuf	hyvjzvjrgflx	ibtlde	f
+234	dyvdokavla	kjwdnzgt	khsvwgvq	f
+229	jvqffebaunl	cfkrbvex	ycsldrreetjwtn	f
+320	xtkryagsndro	rgsgfxlrj	qvfbuhnw	f
+257	oahlpfaj	xgiqehduwkfom	txjpzddxbqufzv	t
+327	cqgxhcft	rxdtpwvihtbjj	ykqxltfnexc	t
+299	wkfhbsdpbfpzzi	fvodx	yjcjpyhkqb	f
+321	ofbojptaazjhbfe	mtawxqimvqlxauh	ktiurjkmqc	t
+296	szfawfyaoh	ocgujoe	zrqswyfoyj	t
+305	torrekeyxil	cqgptqbjnprok	hcfzoxjezvoou	f
+293	xepszrdprcfk	hjgzljiizksa	dwmri	t
+277	yvdxhg	uqyrcvuyzwxyyr	xbkaytwpxfxs	f
+284	dmyyyiquow	bunyjryxfl	qaflscf	f
+259	vwkedatfi	kzxim	bkcqxyrtckheb	f
+316	afktx	dnsrejvondgrbns	rkcfxffi	t
+325	fikstwrk	jawzkj	natursnjh	t
+314	hbxcrxbchypu	fpunfrrorucdd	mctpgycmei	f
+292	crngwvjivm	taqpauslawidul	rhjyzuveswmkux	f
+318	ssfgoqqbe	ywjuwkfdqcdws	ldcjhjj	f
+303	pfknxqobfyc	qrmdexyy	rlako	t
+264	dmvppglf	pelnyxtkxtbl	bvwqkckyf	f
+233	iwvbbypjd	gruueisizfp	ihjthrlm	f
+187	cbmuixtxm	mygmblfqemyeaum	vpdttyvym	f
+319	aygtlajh	gdlttndvfewjfw	owlydvz	t
+245	cxnwyvlbf	zubysdmyqtqswb	njmhdenxjwraas	t
+262	vaocufzkidkzhu	qnguplxwqusdzkj	fqqirhtsk	f
+243	fcqszvgtm	aebjype	pawqiz	f
+263	gyqremeefi	llajsa	btiqqyyifhws	f
+298	pzhhvfnlypmye	nazme	zvfkmnsans	t
+239	cfpkshdsjy	btimobuiet	kfrgiharkp	t
+333	ijajkzprgnnt	kiozbgn	feyuvnjncfm	t
+252	hskxqbqt	ugilrnzbemrvc	nqeeh	f
+330	slonsnnwhzf	apwtwi	rrhegxyspol	t
+280	fyvvfqzdgjit	miwyj	qrngpnioa	f
+237	lussmpqewuig	npevdulqzh	fcgnv	f
+268	uqpfbnqyrnubiei	dbipvhljhbahtqs	dksttg	t
+235	uxnjpryolboo	ifihahw	kbxrjwpbimjyuat	f
+335	pavcdzq	uqkex	jgllduwnyjsa	t
+249	aodvhumemwkqwau	censw	chkjwxn	f
+244	rzvwxyi	qqdzpuuuvsd	jsiqyhufppkkm	f
+247	mudlpgiacsd	yqzwhaee	idikddkgyclfga	t
+246	qowxkt	vhoswo	zkbbxlrtou	f
+236	qkctqoyehfeo	xfcsrixjwnfryfh	uthqpghz	f
+331	gslthuxvznkbyz	upboyv	mzeocxcrudkvsgr	t
+272	wkmgobf	mgnqgiugslhwlrl	kopmmzrwv	t
+266	knnldslwxbpoioz	yiqnneqkjp	wvnaz	t
+338	vwfsojraukrt	jyiwoyqazikx	ixnmiikixrrfu	f
+341	wahnzogel	vljppnb	hjvobhxi	f
+342	pbydjejnut	hpcmopeqbefdq	mpzeyuowyyo	t
+344	ewzxsxdcq	rpktpiaouet	fmtjgsl	t
+348	xbgle	osotpyn	ifaupvhklka	t
+349	cvakuwivomdwxj	gjwkahidsps	poqpkeossny	t
+353	sqwanxsedkkx	pvvfexqulrdi	hoduxxxutoxlvy	t
+354	epvpnbjkaht	equrkn	dzfpiutsttxnsfg	t
+356	blognixfmbhtr	axikf	pgnlhccflfpmla	t
+360	ddjswmocn	yhbujzfpcytc	ccltyv	t
+366	enmttke	lagnriqtjr	cyqbdordpoyz	f
+368	awaszupoqnvk	oeksikvmfukjz	uwesllifuhnf	f
+369	wmukymq	hgyjkl	xwngubuaryubjio	f
+373	usmlm	mbdupykkj	depboqngkv	t
+374	yriwllltvrowmwo	ynpgcbhhcisu	phiegqwjusfoss	t
+371	xovwecyuui	lfyskz	fihsgltklu	t
+382	aqdjlpfdode	lbywqcgxh	kcztznxg	f
+386	selet	ohrjvzyblh	ksgllggdexss	f
+390	iimybomen	bysbg	jmppnqmvcwvknj	f
+391	prqwobvw	arturxpdpc	fjjeodep	f
+345	nhpxxtcskq	furxxsuzfomy	ykvccotttezpkn	f
+397	vnkhsnxizry	nmiroplwlrzhg	mkrtcofzu	f
+399	szgcu	hqgtjvtwgvstx	glgjmzkjwmt	t
+400	bgeurord	bobsstonwfui	erjdklambbw	f
+403	jzphpqorsohga	ulrhkkhqzluj	ajxufnlhlm	f
+406	yxwpwzg	pttzof	igaodrrwjali	t
+396	ngouqpwtsara	aavambrl	aufypsuwynb	t
+408	bptisara	czwgsnpaocvide	sdlcwdixbwo	t
+409	umahacl	domrweqbltgjdg	xhjfhsnr	t
+432	csvyqtvlka	ywcjtqyvpkq	iqpgbamfdzz	f
+411	jnhsvy	slmnwiglrl	oxztuogfdxq	t
+412	xkhaknlxujpcst	kjrbvfpphmt	dfrtuo	f
+413	yjpyolnv	thgxqoiampwfrk	ezebhj	t
+414	fghhazhf	qlwymrkvpmw	uauzoznunvvdvoi	f
+415	vlpisnwet	jwligoxx	yhrjhswp	f
+422	mchnqkjl	gjkpv	svruvqd	t
+346	zlhfyuhegp	ctpleaq	nojwaw	t
+426	aqwzkpyqfwerjp	ngjspkrxgohdvp	nohqr	t
+427	pbbhvujzphsyjm	swvfdxhhzdcyhfe	xdacdc	t
+430	canvpatp	zdnri	yefqudwg	t
+433	idsutpyydvsvgw	miotedpgxtoxx	janxpo	f
+434	pndsch	uafcggx	ncuonviyryah	t
+436	iullwrtwk	tojydthvepdlx	icsgpvviwm	t
+357	wkkpixwkfko	onmvokjbh	svmtiqd	t
+301	fedfqfairzkzawb	spfsv	fjjqvcfwbbhy	t
+350	hdcfockm	vgwlu	vktwhpw	t
+442	nlruu	rwjqkrbutjllgj	thyybvvdbspeuqo	f
+364	ncglzkfhiocvq	yixmaglut	fwqsclpdqr	t
+447	urtrf	rijdwanm	scozih	f
+451	igkxuqmr	hukxznyeykvx	kbbswtfmdsntx	t
+452	ywjtxeeobkpfkq	asmakevwyks	bohta	f
+383	lidvtuahhd	zuvyxjejudwz	hqtjc	t
+404	uaeini	qigclldmwsme	hjstfzlbgthn	t
+402	ceerknj	ueugupnlauyc	rqtfcoscn	f
+389	aipbliapodapaw	qetdmdfnjnt	eouognoswbka	f
+380	nghbmeqheaxlezs	zktxmqbrokhtlql	ovzrcpxewktx	f
+355	pyezygzvbmfcoy	cnfwyk	gbykrsplvbzdgaq	t
+440	naioxslbgooffs	xldzk	yvuxqbwngzv	t
+343	bpzlskcucyzqvtb	xywiglzfteje	rysmcnehzhgnq	f
+423	rirdjuutu	cjaftsm	wwmfgmx	f
+424	yrhlhhuidytquk	emakllguvan	tbepqhaqwit	f
+405	amxkoavbzvlijo	rfkvmqiv	lnvby	t
+376	yfbaqmzbkqyyf	fchit	pnxwbqdatqqilu	t
+362	phlvrbbydt	qepfhdkr	gvismp	t
+159	wuuujmbkogslkt	cyesxjmuzsohlxb	ajviuewnlojqzgf	f
+385	uxaaapgmdhheho	omdkzsplnsc	zpiwllxmz	t
+419	fzrnvklvipdkvx	crfudwesrobj	gicpxztsevqapc	t
+310	yeohaokkpj	qhfciexvvjrz	kamjzozpefn	f
+444	tdivtwwuurtcuua	phaxiphops	tdzpnuzemsxxz	t
+398	furmswyvolp	vlewnmvr	voewzn	t
+392	bjanirhopcgowoj	zzqtydoijgcsd	tsdcjkmucxpdex	t
+378	qseplipvxdx	wpprrin	opdahbzihaw	t
+377	vpisilrtqo	lhzqjwunjaccfoa	yorks	f
+379	ngjoqjzbxcxe	vthcniiflavcnak	mlbcdrhbf	t
+449	adwegdlbmak	anljt	uqbgnsc	f
+418	xbjlzwygsrksaai	lfefljwqzyaledv	psbrfzsjb	t
+352	nmjktkelnjal	ktghnwofcswvlf	anoilm	t
+361	wgiithj	qhpeepzca	sybero	f
+359	cyznams	tqfboua	ldtrdgvkhmyuxtz	t
+448	xepln	hhrxmkaj	hqybu	f
+429	uvbnxfxicauzqnv	yxruau	pctgrcwwda	f
+437	chtqvfyidbqrnwt	nvfjiwrozxaios	hhlaexvgerzotuz	f
+438	uhvglhggmxqjnq	uwsoc	abypvch	f
+410	akyvqcme	vofqieo	ltggjrist	f
+445	dalgupzhoedsa	yehgtwbqnwwprjs	wuzmbi	f
+347	zbmcwtvcoexnm	pktvjmxzh	cdzxj	f
+308	edwfqii	tyeetdpdb	djvccvrlucmitp	f
+420	xfviuzr	uyviimdpxwgh	xljqxhspave	t
+367	cilzznvbeuju	xfirmvolcsbpdu	ucwjzfir	f
+417	bqykxylh	xbnssojsdudp	yhrzeyb	f
+351	ylcqc	hbfjnqhvqdq	nictcnztrwwd	t
+425	lquriavuwe	ehssdbq	zsadsedpvabfvpo	t
+388	suhblqszo	dpfdtcssakmkj	wjbbfw	t
+401	qqytszjd	bypctph	vygomuxtftdh	f
+446	llywp	clgvibags	kentdngm	t
+372	wzsqm	pyvouhzqnkfzdv	qdhtyc	f
+407	wlgxosm	rqrwdusva	lckzidhpspuzu	f
+450	egbctk	jvlhwunqldbzvnv	lqwntostigtblxb	f
+381	wwihzrcw	lbpwz	qfuopoxrt	f
+394	iucxltkxaqs	pkydv	uhcobxfznw	t
+370	kbiakwekeynxt	mihfjytqxih	ldjgty	f
+365	fazbcau	fayeusaarngvygx	rlfma	t
+387	puszneaiwk	gcnptozatzqiwk	xypcainfpkunjn	f
+443	ogzvdjvwcmyo	sjooraur	nsslocy	t
+431	btmobpkqcglu	kynyxwizxf	cwmhlbargborkkb	t
+416	lsuukgp	sdfhrtlrlgxal	numnkfrorsfz	t
+441	uvpwttdykxf	svuuzvjixlpluoz	oorddxsdzbip	f
+384	gtyal	ihgqfkt	ntzydzvs	f
+395	phbgwbpfr	zgdnwxoiu	zbougqnxapx	t
+439	tkuanphvmjkuo	kojgwje	wbngdnkvjclsvdz	t
+375	qmfpgmqoijhnk	fbprnbdhyql	jljbs	f
+363	cxbzuqbpth	vwireat	tmwscssatgt	f
+454	fiuogapgkg	iggsppxxnmldw	ftnpiyunktvpr	t
+455	wllrdpnpyp	wsrdwccdwua	unckwaognbu	f
+456	zignxpabm	bofmwdbu	exqorlbblnhb	t
+458	bimnvoxnygscv	zbzmonadrzobwf	roydyshs	f
+459	mofxshlj	bpjfnpdfg	qgnifrneaeaja	f
+467	zkzhuwls	qfjdza	bkokgk	f
+468	yujjcxhfyaasva	diadkyxm	lpiqsu	f
+470	cobbifptxvdk	vogexgncs	bdaxooipxxdzn	t
+471	glyeyzwzhgp	wijjpfpjskttox	enlhtesiom	f
+475	ralqxe	zvzryiuflfibyb	hslxrslzijjxca	t
+479	zzbxtgi	wttlpmxoiuymxsw	elmfny	f
+484	jrpxyjihs	ueemhi	lmldddtaqgz	t
+487	knwpwdqxaskubn	dprclihhqezs	npglkspxvjomp	t
+489	ocnrmjgid	sxnhibwyrxbgwvi	akfcts	f
+462	yiosnfijdo	ounctlclxck	zutbbzapzlnjp	f
+492	ybdbqebdesbosb	cghvskemrzatvow	azfeuxlsidjhshm	t
+498	oexmqyvqd	ybzylrif	afhuaiaw	t
+501	yixfdmmbykpfbeu	khbgxi	pcltzarxyg	f
+503	wlxcyrqqkpwqcnd	yfvxrrhgux	bkrfzpjjfegxy	f
+480	glmqzexp	dyjxckrwkdyjhwb	nbzaucwychib	t
+504	fmcey	jmepqfgrukd	nbgukupjespei	t
+505	jtxns	zznogauwzes	nyqwslwpqtwu	f
+507	uyyevog	esxfrou	hgylg	t
+526	gofxjgzstvtn	bjqcusgegva	tdsnserrq	f
+514	dvkfkfp	pagcoqvezq	vzdbf	t
+516	pvmesjtizgduna	qfsuvtehsciym	pkacoxikstjx	f
+520	uwvbfzyezivrus	qgmngualvoj	zgwrkjqz	t
+521	lezwbiitjtzdmjl	zphhonks	abkmbnltm	t
+523	jmvykqpe	aiximmxftrsjrjq	uwfnincwxlh	t
+524	dbbnthlvbwykoom	padbvqtqmmf	pgiskmxoovouxt	f
+536	icxbsfowzspm	brchepqge	yvtne	f
+476	tyethdsdo	tfsut	lrtxwxvisarg	f
+499	egojdt	eaioli	kmzbbnosrjgq	t
+528	kzqxzligzsqfpvx	zrhzqgwantmg	ztrccge	f
+529	lhareftyj	bkxemrig	odaxy	f
+530	vfjygikchlm	opsaazw	yrdtokquyih	t
+532	zalcok	dnnli	vqzsguqj	f
+533	hebwauqpdeuw	zmpidaf	wlwihjmblly	t
+537	jthxyn	rkplkocoafzs	ckdnmsalhxzlbkd	t
+542	atvrxlr	oinhdedpiha	ltjqbrwndlemi	f
+543	yqccsnuixvzapv	jzobdpatigjgw	wyhyci	t
+544	frtgw	tmljfc	jqbfmbaxfglr	f
+540	siwjm	xxkimujvhylac	ntdbauiuwxysyk	f
+545	gnyyvientqsfz	ifwfovqpbnmv	vynewkwtypdmxyj	t
+547	cwowkjcz	qjnyktwcucskstc	igzdwdjyat	t
+549	muijorcmvhn	cqikxbfnh	btaeepjnom	t
+551	nifsbksd	ocfbnncskn	cbfclfzjumjmli	t
+552	doxpjkasypoxew	ausaav	rwoiaudilj	t
+393	ziljqd	gvmdt	wxfkamzr	t
+557	vogjmmrlc	wbaknsc	tdjvsxpcmqobjwy	f
+558	pwcjhzmzkfnb	vfahfw	kcdkmmnfxekc	f
+559	yifjfzqwzfjrcpq	srxxz	elqqbdzuos	f
+562	ldjiliqqilfy	zpopzqfbdreyns	jxpdoneyxrimn	t
+563	kycwo	tywesmhyb	tmrxcabwrpm	f
+474	xedteljzoxinm	jcbkhjrbxotx	jprla	f
+564	umlybbt	dhaur	okqkwbotigl	f
+565	ollfeb	dzonddwx	xhxqpkvodlmwrhw	f
+428	xwovafsvekmaqve	egrwxehxlyinbuy	mbpdjskujsat	t
+486	revrmhinu	ozjjxtxsczjq	seraal	t
+502	fotyjpo	ctkxuhycouchs	aktflaewrtws	f
+460	aeulquikzo	qfuwwvwskk	tgqvytlzg	f
+496	joizzpvxcorpf	nzrprfzgrtze	xyofhpx	f
+548	veizacqubulxtfh	bdeyitiws	qmakd	f
+478	mlbvfzvvq	okvswpsdoiazmi	wfpiz	f
+525	yivqdolcha	xtadsfnzzosie	xzzal	t
+464	odprtbtawuughx	waakuom	kdhdojxbopk	t
+539	skmvd	lovhh	stuau	f
+493	gbohyaiqdb	zobtwnwosgid	vifjwpu	f
+485	qcappavh	mxjvi	eyvcipnpoau	t
+457	rduqxgisnkmavqn	kzjopjjzlcwc	qsebdkjpme	t
+497	lmeekkj	cawsqflk	udxpespsenjbz	t
+541	xsdqpjwurypr	bnzxgs	fbvaoyqcqzqcnwj	t
+553	mccnhqlzuyaekwf	pfocfueb	jlahf	t
+517	dcfoeef	augixsxguvdtyn	nqaytatgmkwggj	t
+512	vvzwfkpezkkgm	ibnwconuhdprpx	rccspjj	t
+358	bmlekgyj	opgpdyatzbqz	ugcikworhj	f
+490	dxnwcegrwrt	vsqxj	pwensddswpya	t
+494	eruhyiyveg	hmmmiujkia	jnxhhveoigzppwk	t
+488	yxvqfmkxdnrjgoj	ewagilrvl	qvligikejf	f
+560	sfzkf	hjfgefmygxaxp	cxbux	f
+554	nozrpotux	eeqvcyxx	bwbnqsrynhzvuwq	t
+518	ddjuwt	oaqpdrhwwen	syyxmvqjac	f
+465	fdxkrsxjl	tzxnragfppbyz	csactel	t
+334	obyubddjpgovfa	uwqnrjhwffhqjt	xklbglnqno	f
+511	doyqv	qfgvkxmpyuffw	lxautf	t
+483	ilqhscvjjqksgsd	psnctthamslld	bjeytmjnm	t
+527	dndefwiqspb	xfeitzkoxlbjtgz	jfigbl	f
+535	ryuszd	yuueze	siqsnkl	f
+561	jxivjxotcucw	kxfdacicnfsgim	jonstsxaacci	f
+515	huomvkgbux	bcopmowhzdt	fwudkptbmhn	f
+508	grixxjvsb	gnrjyjcvoz	tbnbwxeumhvwdhb	t
+519	wjzabo	oiuwvbrz	ksaswnlnoiwfsis	f
+555	gkhcrqfpa	xrlymhjoxdmstis	wnyzybyemifvcvn	f
+531	qnkyflxkbf	ihmeoevoeffc	lrimr	f
+481	eosaevrwbkvwez	yymhw	vnhazawx	f
+473	rcdbylj	gcupibpvql	tckmzimfj	f
+482	ibszppeqner	onbwdpnjgeln	ijnsgshggqw	f
+491	pzqqszijwlpkkoh	imcanhqrflxgoyw	okteg	t
+461	qbqtmtgendegv	eumtkb	qytzvavyynd	t
+463	wwveubbw	qsxgynfv	qvqsglz	t
+469	scexcvqqpeb	lnqaosq	ucersmdiovpwib	f
+546	rahlkyrpzfrkey	cyuwdyvrlp	txlqpe	t
+550	biqduwdprn	uffwx	nuvenpky	t
+500	yaxcjgeedmhf	uazjh	abqhymnl	f
+534	lhqqngvp	ltpjqc	ovzuod	t
+472	yesdt	aowpoyjgozktcvb	wsskyqds	t
+538	sybkkgkauxaqeik	kirvxfmvovn	fgwgh	f
+453	kbsqasat	ynulzouupa	iuyiw	t
+495	ksanncyvwhwsexi	uqzfmeqwbns	oryjl	t
+556	akrsyojdvf	aavniuzs	mceunx	t
+522	birojuxltcvun	kcsckvjhccrzyw	nibepaslzre	f
+509	akjljonpny	afmnhiuwf	vkidcaqm	t
+566	hpvoqcbfv	sjziadyfiafmcve	ryrtw	f
+567	cspwnauvilxmuep	uifgcuxacq	xwbeqdpijrow	f
+569	pjvtjzgki	gemzhjp	gggrvnosm	t
+506	vtzhvoljypzipv	pozrxyzpgnoijot	jhnyz	t
+570	ycktpwn	qyohdpnfkbgprz	lfqvowif	f
+573	uyfuerblzu	cvuvvaizpzeqhbk	djukugetqcnlny	f
+584	ffnmte	mwqdusw	goqfqvtvwounmfq	f
+586	eaofmvupaaz	cwybangebvmvycc	vscbhf	t
+589	efekbjx	qizhuraekfqqza	pljyghpk	f
+592	aoohse	yssoamktyfgg	qbfkjeckxjougm	t
+593	rcfqkiejciyaee	wvwjjihzanf	ktbcmyoj	t
+595	tkdcyf	fgjgibsbyqll	qdmwmfux	f
+597	ztpatyhmfjftwe	foiiwtkmbc	wmlhlolxojmbrav	f
+598	pponhpca	abcfeqkdehsm	tsfawraexshd	f
+599	rirgltahosx	qhymbg	mxhol	f
+600	loymuyz	bdzjvgdiap	lzfxsiydaknx	f
+574	qdwnflgvltluh	emnsvqbnwbow	noqyqufsdfpafm	f
+603	ztwdtjloiyg	zwwjhufta	fbtiunnsvshlg	f
+607	gypdifns	gwuyanfogejxlji	atujalaxprilbb	f
+611	mkrdkbioecoagmk	xkkrejwabmsdhb	nswnkjfmgjgge	f
+615	nwwyqvuhhojg	vtnopuwgoylrx	dimzfwlhkf	f
+617	nuspcwcgpqlqmcp	hfqkttntamku	ihffcyxqfz	f
+621	avurpltw	sxobzaxkvrgexa	brlkp	t
+583	ryxulmv	qdybkanailv	mlwzrashrrkws	t
+622	bghpzrha	itadryyzw	ftwqnicqkkhjfbc	f
+652	khfvrtqmn	lmrhmpyhtej	adynihuz	f
+625	mtesrfytq	blxfpurveow	syebyixlqotbsxl	f
+627	momhrzdfq	hblafojzt	yzpwgqey	t
+466	tjdmfkgxooqisph	wrtjl	ywfbn	f
+628	urhkq	zdiqnifoybwt	sxhxbdgbcvcgpw	t
+629	fiudyjbhtgoi	biouccnjfpqvm	sedlmeok	f
+630	pcnxltdhruultkn	bfiqodgalnyd	sgppabpa	f
+632	dxuvoofuevn	kothhfsw	ordwyxgi	t
+633	tyobush	bhwmug	strylaeciamt	f
+635	pzmgyegsfbnzzz	buvbfdde	jboemxpsrnb	t
+609	zwtsjdd	vndlcjuarknce	ydbajbhconfwzbm	f
+639	xqocfmhfhguds	lcjeluul	jsmgxbbzb	t
+640	roidkrwllrzlde	cooxmr	bwbabqngkyxllt	t
+641	xjsiisvhzx	wdlzrdmlugzya	xunymye	t
+658	inhgt	djzzew	xmfrqmwjpulfmt	f
+643	pituumbafhlwstf	xnsmpzoj	ieqzqkigpg	t
+645	zecfaarbvzbu	duqyeaxjqgdenx	vrlufyyzwfifjfr	f
+642	aulnzarsxwk	bnolglea	qujjggoebrtow	f
+646	kvuicslypi	eanawksxw	gbbnuvli	t
+647	rubjo	wgqeykdogyvkrui	crwqgpfzgofqv	f
+649	ulyzipstcdd	eqookgjcwd	mwsfwcol	f
+653	wtcfeehtuyp	dseaxcyqxukyr	rneclilfhornjn	f
+651	lmott	islazunvx	vuwtgyzj	f
+660	zjxbv	neuaicmnsgyhd	shyeiazbfcmdpgy	t
+662	chvkwcrdr	flsbokmedg	rdskqlshiruum	f
+663	wgshnqfvmvxdg	leqlshebpof	liaxetcawhheuxp	t
+664	yhlxuznxg	uqgiadiodlmgxya	nwztmvkoji	f
+665	pkwjjw	wyboeltb	qnzkebdb	f
+670	yzzfozyuy	edeiddzntm	vhwodffhizgbkjx	f
+671	qommhygxxccjgn	urglyqnavilhqva	khrhchh	f
+672	eluidbj	oruoofucqyflxt	fsarzzdba	t
+568	mlmuswm	tdjswaltyedwvul	pedcpa	f
+668	qaazrfvsplbmfn	ixdebzmfdknazl	hbljngcivyxmcf	f
+585	euhyuqbmr	iibczid	smlrxlffhb	t
+612	nvbrdziwmtqxvj	fzubazxfrkeae	rqajb	f
+674	psotvvmunmvro	ydaye	eudyjtbhwglylwg	f
+673	zbekvp	pvxpnrobucnp	abrjgqsfrmtshfe	f
+666	apfkydctszel	lpuxxhhqpo	eqikbuzgy	t
+578	ivirzzlqcowzi	pxtdixibexe	muwux	f
+637	iyzvlmi	ebduvuldm	xrjuomhhfewn	t
+596	ntqcrrlewf	pdekbvpdqkswzv	uphewoqiehs	f
+675	vvkrxgery	qjozonqpbj	qdvenfnfnz	t
+575	enuyeegrwmynd	snrzwj	ypgpazytnrdcvu	f
+657	kpbobjdqy	zqctxrhfvzps	epehugxt	f
+594	dlsntx	izdbpdbjnbcyj	pgthgvm	t
+648	xneencikm	ghahndiuwahq	rotkwdzypcguay	f
+669	codghkpdmwogu	nikkhvuoen	kywqz	t
+580	lapjqacykkl	wapwv	cmbrn	f
+606	bzqiez	rwlcv	iyuyslqmptwt	f
+587	kobzwxcczccdc	lwnhmahy	wzgyz	t
+619	ukinoodp	zvhflwh	iuvnmisyydoyg	f
+588	kgsuf	dijxtbjnmpcg	gmiktn	t
+650	alwvr	qlblci	inxvfguqffxuq	f
+572	esnewfokuvwpq	zdsjxjvmpnkyguo	pxghaduhoqtqsh	f
+676	nofqrs	rlkdx	tajklygotuxqvq	t
+604	zdjwxgk	sicoawt	sxglkswtatfx	t
+620	ohytou	azofwgyyoqg	srrgwfsrmewgpmf	t
+616	yumpnem	uvijesimbkdyks	qdnule	t
+602	ekcmrnlifmbnlm	qkikcbxvpcchzoc	ngxsy	t
+614	cphnyf	qxstggcfasa	wgwkd	t
+661	gfsivlbuyhp	qeenceuyl	ylxjpxudbtzvti	f
+636	bygrhklytteutn	wsjkhhy	bmzoj	t
+577	sxoazaaijnyt	cwfalqrx	wavgr	f
+644	lwluyyekxrjwzt	bldibajdfswjeh	gioljqzjvkpwks	f
+655	dbsinm	vokzs	lwsvpxp	t
+610	saiictasykng	sbktp	ifuwiuppyabaj	f
+590	ewdcjettgkio	kgtdxfq	lwmxhzgb	t
+591	hucswa	euymge	clmbtuywjnt	f
+605	djtclaoygf	xluzmejpbz	dfuowiy	f
+613	xvdtxijxzw	lsscownx	ojjrbu	f
+579	ympbhotmoyna	ycmuns	vuxbdforecsm	f
+623	znfslfijrjleh	ozxwpwjilus	igsxcspfl	f
+618	pnfdqqysszedfr	itzdlfnzhednvmb	hddlsgwgelhd	f
+601	wlrprsbrwuogk	svjttsjkxsd	awrsdfngedaqb	f
+631	nlrxhpfgygqhqkz	fpicfevqqddwgj	aygfkpyi	f
+571	nfttjnbdmc	syszewchkywpouo	mneakx	f
+576	jvhvbnnggiuqxps	tmofyktc	isqtcjrncgicjke	t
+624	sxbaq	hdxvclpxg	qxzty	f
+638	uummsjr	oyzmkrjw	sjblfzswbzi	f
+667	mcfnd	rnipkqv	umikdf	t
+608	pwxnwtg	renthpzrze	wcunvxoaeppw	f
+656	afxpxgqxs	jwxzxxwtgzxei	aznpc	f
+659	xbkvipf	xezwnokkx	uldlvhltvgfy	t
+654	fymaatht	locpldhffwpmn	fuqxjnod	f
+581	xxnqsxvwu	ayuvrvcabkfcxcu	znbntvxnxttg	t
+677	nnwfqtmtzeyy	uiwgpjemeqnkl	xoorx	f
+678	fsxncyhqkqku	jxlrbieelyvzdk	ilzrjjcp	f
+679	vkpcofogjyem	scujdphomi	xurcehobxajddhi	t
+682	dbrpmcywwhzmfye	dkrogljbq	nwlqeziodcm	f
+684	xifgmqzkr	irqukdk	iejyan	f
+688	tvpscgwhmeg	zfyzm	udvzauibhnfv	f
+689	ujftnijoaqg	qjahduwskwzv	uggwlvzasvbdyjs	f
+693	jjuuq	vlwmhxje	sgangaoefrcqhh	t
+695	jhxge	pjmfzwyelpkd	jqwgpstk	t
+700	rdcvsntvpvgz	nlrznwvdqj	fmwlslcepraoo	t
+702	qvxinnrfjhifua	zqpcnlxanntqvp	vixlpjnfq	f
+703	zvzdrheomqqqhuo	gawquijzute	qjqhdjg	f
+704	dujvduarng	ivjvlwj	qkedfwyegiqbx	t
+705	vtpilfozcxddl	fyhsxfaa	tqecprsqcxk	t
+706	talpwqovdc	iyacjsafybw	yojnggyt	f
+708	aovrxeceql	stfkjgpzx	mhmsavrfhwpzfdz	f
+712	haslbhga	iafbhqcns	mibncpndpzoe	f
+714	oyato	smqsioyr	hjvznfj	t
+716	jiizi	ebuoxsieezsx	bjmfmzlptgqhni	f
+717	dmtgb	adhkr	ceklbamoofnw	t
+709	bsrhur	khiakwfnwsuk	mglxbpgzjig	f
+720	nvcwxtw	ojgqdx	lrwpgifst	t
+721	hulsoqdk	pypmvaat	nwlwhipftf	t
+722	gqekrdcrlr	cdtyjwljy	nsmzisxlpziobk	t
+724	freuremxkkbqreh	kvxudf	sfbfuseljxnky	f
+725	ndlyzgqkzjeidz	oxyxsjblwjxlde	kcvphb	t
+727	rbzqwnnr	fzgmwrepdxllgba	xpqleys	f
+729	msvjny	vugoszbnti	ensnbgxtearjne	f
+730	gnxcbf	iinjrmbifzn	oupncbvvhikcfzm	t
+731	vqaiecm	qpfhs	cudbxfpvbncn	t
+732	vqractiaxhegzcl	bupbbkiaipusu	byucj	f
+735	najrclyqeuocw	qiiwuqt	xhghtunxgnxlu	t
+710	dpxttqaqkhf	ysmuygkxlecfu	mcexbey	t
+696	qolpuibbdnry	gdrkyva	tezpkzvbf	f
+739	achnhoyvs	wnjdyoa	qlicuwo	f
+711	fphmilxdxuh	kmwqzrp	mfsmpnkzlevgcly	f
+741	vutqyju	uvtwmjlnh	rcbtg	t
+742	bimcwfb	yiotxdsedg	xnhqkoleagwvf	f
+743	qoguyhd	mmrkumb	xlzusfvkrafyq	t
+713	temanonzsyn	kklxqsjcfrgbu	ovnmnfulb	f
+747	pxfxz	pinoekj	vwloiifqynkr	t
+685	wrdcnkwqi	wcbfkfltfpgbjno	rxxtleru	t
+749	aovdavxps	nhbcypvpq	cubzb	f
+750	fyvpiyxhuueqk	bjdggglebhcac	mmffkurxwgjbygf	t
+510	jpkurdsp	eingwzdzecuy	icxxzkrslojedj	t
+751	mzbgemmwewvyk	wcgaytepsbfyqic	gnmkevl	t
+752	jwpnlltc	yndzced	lneup	f
+753	rrrcgquryizqap	fakeegzjlfhyu	lrxiayzq	f
+754	gsqgxmee	ixfhsgbzmbvpvp	quohuiukms	f
+757	jebtrlhls	zudbeyqikuy	yzcszkuzvdmk	t
+758	qmjfhdglbsmhpo	hpjcsdou	gujoscjcy	t
+759	ohodjoudv	mdgkyllpni	ncbzmiesdo	f
+762	wttwazxleedfbps	zgbnvtcqu	wsmugzgkhmn	f
+763	pyzuqtskt	ctlmypcho	lltjgeoqywgxod	t
+764	lvjlq	azxmidpqvragk	qmgmedpgeallno	t
+740	veowhglscb	sajephjduyy	qkbvszpf	t
+765	tojjic	loufkcuk	uyeacqqwgevwvxi	f
+766	rwsojdq	xhcvabzw	txyxks	t
+767	ypufabvbpe	qrjkbojuzec	mlpaoeg	t
+768	xqbhcmliivxbxu	icshjxod	xibgjlto	f
+769	impmy	vzqxyftegxk	lzekrvbrko	f
+770	ifuvxssgxhmnruo	diihypamyhbr	ifnwp	t
+772	nmzdzfyqce	xnayskfiy	mylnglw	t
+773	caielqimeuuda	gbevlurbvmvus	wnyghgu	f
+774	fzpumauomqjui	guxwty	dphzqc	f
+775	fqqxlynmvhb	rhjdebuphc	iottzeukovxoob	t
+776	cswxeriwqwewbe	arrgjrvj	fqjmnunokpskma	t
+779	qowmgr	ndqsu	lcczhqr	f
+780	drscn	queysrc	eqbqaoiqxj	f
+782	vzzkwjtsafxqa	mchfxwvrgu	vbkrxsqpcdvj	t
+690	nrquneemmfplty	mxuzoxy	mblga	f
+784	futofjlfvqj	jaehvlu	bulxp	t
+785	cumkhjhur	dixqdzmjspwfozo	ulxmi	t
+786	oyqjecayhmykxhp	puoowgxpmkynelg	dkhjfdkquizz	t
+787	ldqgnxdpitux	xipehy	sdponovpwlfadgy	f
+788	nqgogghxhmub	mmecmlqrugq	wbvilphbhvz	f
+789	sllnfeu	lldnetm	durzdbg	t
+734	txpoycm	faxjecdltkhmmet	otalyvfjhpgo	t
+723	mlbwean	opwggbsbgwhav	mwflhxm	f
+783	kjxwzapmebyivt	idbiyl	lbptfjhd	t
+692	tlqqonzzzngmga	jpttuetq	ofkxnschkdgz	f
+686	tftzzxjs	hglcy	ngylqbqvrbpf	t
+760	jncfez	tdoejfumoh	efbphgvqzufzw	t
+718	mbnojqqkf	ckygekadhthh	aqqjbr	f
+697	yioajbykyvsu	inqcjqagpbc	gbqdgkafkiyqe	f
+744	vjvxp	eqfgymtt	qyveyatrmvz	f
+694	tazblqc	tvepobsdoasj	vlbfgdfxn	f
+715	qxcoqtqsjorcqug	cfsms	yfjdoqztwsnv	t
+737	ilaktkogol	rrqrfswowfmsgl	txxlgfmxbcahajn	f
+683	isithkgvxhalsnu	siwbfntqc	uerkagvbyseahra	t
+283	blogapfxj	hvakuhurqk	tbnpcvdfiypiwfv	t
+771	iwxhgtzutadrfu	pweehjxpuhhiujy	nzvvgloirbk	t
+746	rrtugpjxqkaofg	bwyiqcrrynoaqn	wolnqdlifjhxhqd	f
+745	hljstkixv	whvibvp	uospdce	t
+748	ipqkihmuxsofcmu	jbgvkvcputxxy	ehagesoktnxuqt	t
+778	qgwhrnfyxg	zhnyoc	nxdqhymlthsy	f
+691	uyaatfc	agagfcwtxm	okvgfhvveo	t
+736	kstcvzmbwuitip	sufxefmyupek	prymfbo	f
+738	rdkfeo	gxwvh	lxdamjevv	t
+777	uawvijk	qboidgqggqf	bfoomuxxqv	t
+707	kzykjzwnyzs	cdwblm	gxeusxnyuotfxc	t
+719	iovrfektbnxxgd	bxahhr	tgsojsuqcifdhwu	t
+680	ldqbbvaryoygo	znytqmrpxghefbt	iirby	t
+698	zxausmqi	jrafa	jttje	f
+681	ybyornmr	zdbhyqjofxzx	ojrgtzcwzcgv	f
+755	lbxyljq	csvcmqp	vgharwflz	t
+701	pxhpbypeuxl	uvrvnwimyqpm	fpyxnmclfrxca	t
+790	ztxhtlmqvgdtw	envkygdpyqdur	sdeof	t
+761	ppixwvlazrwvvwm	mlteietwxdav	cwjcroy	f
+726	bmrvdejnzacn	tpwotrflcqxyis	kwfkhxvvm	f
+699	hnjfxxejkv	pdqqmyhz	olwjliu	f
+792	exsinhjzcjg	sxadhezqlvvqfsw	rtasczhqbi	t
+793	fexkaeacsesvpro	nsircougmpfwk	akdiqff	f
+794	vqxfyhxbj	xzulwmzvduh	eylkvhbwubkmc	t
+797	nztqsvsdsvka	amsjwokmsnfju	bnazmwzehl	t
+799	uliruoi	hrqmoxjtyrt	lwegvyiex	t
+800	glgmk	lnjqgkreozkyfa	cgqyrljwugbw	f
+801	dkjej	xodjfpiokhwkpi	eeiytwxwpyjl	t
+802	szparweitxtdy	cmpawx	actfvtomaholv	f
+804	azcydxrhyfkhom	cngimvbnljfbtv	njpsicojmkyi	f
+805	cpasqbvky	pbchyr	gghcqzamgmw	f
+728	xgckvdamea	qcifyadielowfn	itogmp	f
+807	nsdmmmkvyi	jobjjbwcjr	yohaiv	t
+811	nirajkmxczspso	fczbutgrivn	pdhem	t
+176	muljvgbsxqoddu	aninvqtyte	gzhljykwfhhp	t
+813	ejkuqhkwnwjzcj	ozcokmleanczmj	hbkaexe	f
+810	jhhbzhoi	rgbjyk	kfpmpxketqno	t
+814	ehnpdlwjaxc	iovmbqbfz	qfwegfzl	f
+815	zftckpzo	xtylwltjgl	izeeyyj	t
+817	lqeijr	jdizanii	qdrelf	f
+819	updah	sriumvryem	pscmvm	f
+822	kezqbdoki	klardptiltz	lykhrclxagwjh	t
+825	dysxa	uchqbpvfuliy	eigfzka	f
+829	penqkiegr	bxbcynwlunhul	svsinppqbvlgxy	f
+832	jutpxtug	vxbqzuymarugs	hasujvnrmuv	t
+833	yysftpks	ncxljczyvh	yugysazdxtyz	f
+834	batuwkiaiuerfz	krapftdwdsl	clzejclkayxvf	f
+836	jxdjd	lthut	okgahcbengjnd	f
+837	ulfiifnsnovqsz	jhqjwsllkzxzfrk	sasygofsxuzox	t
+838	azcvemltciq	vsfvlkectdenbe	kqjvcafdzuale	f
+839	xplxzns	nzgddmipdg	zksimmtn	f
+855	haamxamkunfm	hxvubhbsuyta	llzfqhdndm	t
+840	xghvhmb	kvonpsezciqdd	tkmnascplu	f
+841	oofincxv	vwnhahd	bxemaltkc	t
+842	vrxrcyyr	ypjnsgtrs	awjmuccatz	f
+421	lhopam	wttnaormvwykwv	kjchbgngvieuuo	t
+844	cdtsmvh	icklzguvdmj	nawfxoudpotjx	f
+812	lnjdgqitkxob	yltaldckcewima	icqezeunxw	f
+791	qvyekzpexw	yfnftgtikntelz	xyvdvn	f
+845	ixcihbmf	kqwwa	ygirsc	t
+847	jbhnpgjwpstvi	mkdarhibbcww	wbfbacztfidamyp	f
+848	ixzmbamkifzyru	xpavufmib	cfabedt	t
+798	dqiseslbyjkd	anvdlunqjxznr	srbgpaq	f
+851	boqad	chrtfwidc	djwkm	t
+852	vxurlzetgspb	gvhqwzpknqvqxt	esjsfuea	t
+826	vsnibeeyzki	dqduejqxdyiduud	peswr	t
+853	qkbmjuhymgei	zpszsspz	mzjxxojulivgdp	f
+854	kkdbgxfya	kfsbqo	qphsorgw	t
+626	ltuxzfyupy	turjluqsegsrn	bvragjapjvu	f
+856	edbrg	dnqbxh	uqzosbb	f
+857	ybkkxuxpo	caoilokj	fjbqddjstmnkbqg	f
+860	afbyfvatwelc	udwafsjbmyl	cptbzbvg	t
+861	aldawmxhwdrgb	mzhjxaljgi	nerrf	f
+862	wdavlxeamnbdzi	wckovuodgn	tqyzabkbwngxpd	t
+863	zzbwoxmvmke	wmutwmmzvip	wmeewfrosn	f
+864	gjtsrdmsk	yaaybjdd	fjhzsxbcgotvmd	t
+843	ccoqwqfotlxyr	cnbzcisiq	sdedx	f
+866	prgvgxxaigfb	oavenceyapzckw	bkmqobjshvq	f
+867	ukegkeqmtjqp	lifgpa	ocavkkiacbiylv	f
+869	qlahzczuleq	uivlbsgi	wcyjiknstqdfzm	t
+870	cgjorj	ssyjpde	xmplw	t
+871	totwiyivbixclrs	yxvfnwozvrang	enowgmuue	f
+872	bkdhhlbp	zypuimaanhpdfgm	zizbcypn	f
+892	gylkahdrjom	gzkwnec	kghtfhhgoe	f
+874	hebured	swmhtekwqxxmbi	miafmbuinthlm	t
+875	grszwrau	rfpreikarm	lftcsvgv	f
+876	mwskackgf	kfjgkugov	jbqvjxh	t
+877	vjjyycqe	zjeqkauqhzzxp	sxxhknfg	f
+878	tyzygy	qjtgvgaf	sarhkgndaulo	t
+879	delkz	iyvdfypkgqq	juupyyv	t
+880	ubprhgw	gkdzavhszbkle	uinnhuwxjfnhn	t
+881	ldunsbjmzz	jbmpffdarpirby	uewifjdgo	f
+883	rpmigdvkhmdu	rpvkiyajq	ntsfeakfx	f
+884	bqewhwqjiblwo	lkzlcyalsguuss	gvqdu	t
+886	ugmzaplwxiztf	rdlbnqqrhuuwbvp	rywffdosemquzra	t
+888	lrimlxznhvdkz	rimqzfjcug	ojway	f
+889	xzokww	qkkxgj	xphloihb	t
+890	qdgaksuovzh	dsgwclzj	fvozq	t
+893	kfhecpkaildqqy	pgsfflfx	lbpeblk	f
+894	mrpzzsfgakdwya	ngywn	oonaicz	f
+895	njoivwomxfgcrie	krkqb	oaprttisvjm	f
+896	rgsaxyrzwb	upbdyuqqvtgccgy	mztputmm	f
+897	kuzau	etykwlqz	utclw	t
+898	dgavvsrcqbju	skgpvjcbnuypeiv	ijvphmdazfp	f
+899	cwlhmfsqdxg	rttpzcdmw	fsiorvfipfnkmm	t
+859	bfudx	asbtfarzgjahlyx	epevgks	f
+809	blwvboydbgwxn	vhbcxjrrc	hqmkfknzdotfp	f
+821	iwbiunpbjrfqe	xexxklhzegg	eoztntagukx	t
+796	pjklpyrthm	pdraftsjl	oliaouprcmu	f
+849	zwbnugdxmjyrodl	kekvfdk	oskqqj	t
+882	ghdapodnm	pfzivv	docfsvwultcoaqj	f
+818	qiujafsucppuxf	zgsdi	yapezcbdaiwjufb	f
+868	ysxmtrneensj	jjorhy	ojfnulnk	t
+824	sxwitd	vtzxnuksftlcgh	zhldtkzfow	t
+846	nmlqvlidjyus	ycilxhl	uzhsb	f
+831	uvkuypd	lbmcmphncgb	atuhrwtpcd	t
+901	ktpxp	nwiykjyllwiopk	njouzyh	f
+830	gquwoc	gobfuckikrugnur	atzslvihzfxjexh	f
+816	smjdzrmwpppkoad	wwqcrqexcxgqz	vhdzlcjflyp	f
+827	vjbksz	dsfhkkzryuxnrli	chszhpeti	t
+865	rbqlphxz	unzpglouzhfuiv	krncyvsxwojgoj	t
+873	jafrxmsu	llaycippior	ylyhjgbovzja	f
+885	blhjtegbwlepm	vrgkfvkctighqtq	omxofkclrqwr	f
+828	ansihhaeparb	fzdmmyyxp	espvmii	t
+806	nayijdy	liffipwjcvirv	kdbxwcsbat	t
+900	vhmqvpq	jmtfkopqx	ngiylhpjl	f
+887	ahhljsh	znwvmuhklwondli	pabueb	f
+820	yjtpzaw	zfpgs	hroqwdfgeoy	t
+808	iqacrps	ljosfstnvoii	inqiuduhozmwes	f
+823	ohbaeuxaqemy	uhkmmhi	cruogtmjbjvj	f
+891	niatlnlihaea	byxslaisa	noibgdrpobc	t
+850	ucunfxhw	hrbljntqkmi	trpqkksot	t
+803	lgdmrr	oauaqsxu	hgfrfipxptec	t
+795	qdyuwyaght	scymyslnlcqn	oqbnpnyfuc	t
+902	gunggodb	yqixxf	vzuobnikxblnwy	f
+903	nkuprwmga	kxrkzxbauca	ojcnuylsvneefyx	t
+905	imwlz	ntdjvvuzrskqxg	lqsdybzhqo	t
+906	xvvmbeus	yjzlurng	qokyxebnzcpb	f
+907	ctuuxdssadnfcld	khihsk	xpohhsohdeor	f
+908	xtuetepfhr	wwfwlckhx	atpmnus	t
+909	xmcpfnf	qmeeiic	xgnszwsmogbx	f
+910	vjqofrapz	tnnnnfxrwubrm	eanqzpkak	t
+911	ksuqrklenqwyzl	jhwljisy	zcwbdnkolpxecwm	f
+913	ghazvmee	qyojfadwotny	jjnbbjzvqavyy	t
+916	nhzqnw	xdtiq	ebscemopbwdkgyp	f
+917	qbunmf	keced	nuqlctplxyegdxz	t
+919	ewwfatqkieffaab	jjbzszk	ohexllr	f
+781	dkwpvnvcoxi	gjvilqcqhxmwqzq	nfyolmdfqpgpndm	f
+921	gtnmlxtc	fqnlmpamvkaabu	vejrmfgo	f
+922	zetmsh	vmhnulx	gfezolpamo	t
+924	shqvcvtfllzycz	uwmoorvtnrusw	rkdmavaskeuyzn	f
+925	bubaoshcp	nkujcixggkdxc	wpotedqvskxdqzv	f
+927	yqthxpmylzplvpv	wbzgzqhbeka	iclzihhidlvdy	f
+928	hoorjdqak	fbnxueesnjwsja	oxtmvo	t
+756	hnsidweuxty	odlcdcmfqef	ldswnnl	f
+929	nxidgshb	cakmjdnjlwcflrv	iyiet	t
+930	fjsiz	wpfzumjyzdr	cezyxr	f
+931	fmxpmhghkhds	bzgxrevk	qlsdcfxigbqug	f
+932	aagyahldp	cnjoapytvnfzalr	pthtagb	t
+933	jdomme	ttpgtbkolou	uknihvup	t
+935	wluicdluys	ksvsu	zgfwdxuhzpdubf	t
+936	zatiemtsajgyvsi	pcybwobwuyxvthn	yjrndyydmguq	f
+938	widfjulmcbmlhrv	fotvkrohdhrhd	czklqjtypgrtbp	t
+939	udxtdb	hfcreogvdin	wkebmowkfmexob	f
+940	cfjgf	xqswiiczna	uhftq	f
+942	pkdiexlxxhzstxw	ntstukvmvn	vbmiaza	t
+943	pgokqnuxb	pwhazlpoaloxlm	psrlp	t
+944	yekrelt	qegemx	hlrldudzoia	f
+945	wniyxfw	jvohyjotz	usjvlgfcpdc	t
+947	klahuw	usgkddumb	brwvrgcpeqv	t
+634	qhrnhikcwvsesj	mmpyrmkqahuy	brsttmoivyecb	f
+950	lwozyn	kqkiwykccl	yjpoblznubpybi	t
+951	bnuhcwklw	dgwppq	akvvsjggtykbng	t
+953	ardpihon	zsqovcluqeykcu	lkxrjiehpbx	f
+954	tsakcpl	faalzxhgkgvp	bkgrdwgdq	f
+955	zkxbfosmqyzmfa	ilcntburjsf	rzwnrcecjk	f
+923	mclogyvvpl	qfquj	aumpnmgxzrgjkgv	t
+957	qgokw	kiyrnxyf	xwfrtnmgf	f
+958	mryrlsngsew	mbbuwuqndcdaqfv	spjdshc	f
+959	vasfl	txrduwpfo	xalvfve	f
+960	aczpycvoleq	pjvlgboou	gvyyyqkuvullnmp	f
+963	pvcistni	eqxqr	pdonktydrzntc	t
+964	azguqsyzjwlszo	lluxhuzo	wqsardgi	f
+965	nmjpsuk	hnqqhhilndcb	ilqwliqcbnp	f
+966	ayhindiiy	nbbfuslabnryjpq	zsokpli	f
+967	wormiewelmx	covwwswxqdsu	ujmrquhwypap	t
+973	lrasmsrksrwrhg	efhllabkyqjmlzl	dashjd	f
+920	ghpnln	jwjcmlaoqd	czvhsx	t
+968	ettdcfxgk	brajyundbkjn	zquzzubguyirtl	t
+969	nyiejd	dccvdkp	ixmvqzgsutdgmwu	f
+970	dcbgnebyavxjt	ombqaghbusudxse	nyrwnbpxi	t
+971	uapwfbdsmupu	ngqgpafne	jaslsmwcypfnwdt	t
+974	gkmpvrdvbaxgl	vrkubv	rsearymnh	t
+972	tatzwoepexy	nmsqqnsuk	lugndgjiqj	f
+975	qnwiizo	wzlloe	dkmgxdebtfnnezv	t
+976	gppsc	coyxbg	kegqnv	t
+977	nuxpwblnqhlwdif	zdcgxhfqxj	wyesoqfaqm	f
+980	zkwrlvwqfhiudo	zerhguiuefqzt	ehihqgluucqjytr	t
+981	rkszyszjteomxd	zxrthajkn	ewgsb	t
+983	dluqmjykk	wmrwe	jjzae	t
+984	gbovjb	itzqgmrbfsgz	mrdcfvuxmbly	f
+985	nanfhfbeg	vpmfr	swogovkt	t
+835	eozkwxtuehjohd	mdvaynavuksy	yahyeoqlg	f
+986	dotpqqwpogpo	mzmhxsmswtbfxef	ncpqqcst	t
+1000	xogjjn	msuriyxqrfholi	dbexopkqghizad	t
+988	mkvpchzdwnnhf	hwmbyipn	awcjrzroxedlp	t
+990	bjrxlscwbiemq	zcirukcnzug	ukwbamfptgsfnhp	t
+991	fwhgucncx	xbohz	wadil	t
+978	dtggyq	kbhmllky	tizjvporddspnmg	t
+949	tawptyegqh	pyyzyigew	msbdjiqcmqynk	t
+993	wgqlbgiawhlmvl	wbqybx	hxfzoteckguyqn	f
+994	fyjdm	zlwdxioxmutykje	jplrpqkc	t
+996	uktpq	dslawnibx	lzjxnjzu	t
+941	ocfqkddzlim	bvgqkdwery	hkayhbrz	t
+997	imwbgvskbzztxb	gnkhyazfw	bpjubft	f
+998	iaqveophecwck	hvcmmapj	aabjzejeppgv	f
+999	tgjwyosfmfed	eibrkc	qebtgyvtah	t
+1001	ywwvqbh	acnrljegr	kbsplbods	f
+1002	begnzbhfzb	esygf	rvhfdlt	f
+1003	vpfdpvmjlhapyx	zukbe	tthuwwot	t
+1004	athktomsczycsk	ctieax	jcrqjukmorxvz	t
+1005	chqbac	licid	aysqypvh	t
+1007	wjuavhasmizs	yvyincyylmkp	mgrhidkkbxlebqu	f
+1008	hrkamicyd	zuclvsrxgvvz	cxacicmu	t
+1009	lwcnb	yoxbibabsrwon	nuaqqdauiyhzrc	f
+1010	zblpftikqcnt	eoewyrsmxe	ibcxewztu	t
+1011	eenvrimhxazds	sxwryxphf	jhrdxrzoar	f
+1012	tlrsvsf	djubszv	wcdkfyiyxgpp	t
+995	gtiobbwpkjaqqk	nirbhhzyvxeqrsy	cvlqyupz	t
+956	agbvgngpqbituiv	vvszqvhdoqb	bkpqyeygk	t
+961	ogtfbbaqbj	wftohmq	zuvjavphjkh	t
+937	hrebcnmgn	qhuofwkpehdohhb	lwrhg	t
+982	xtisbtugvb	ixxlao	brplqyukflb	t
+952	vrozqaspz	lzviabs	hqarpxotvmkbx	f
+948	tlcakq	qdjtjlyjsm	nbmqajhhl	t
+912	nbitw	nadzakf	tfwwjir	t
+918	takrpmhsb	ponrjros	qjnbflmc	t
+926	wirjvv	uetdtoggzzsmyf	bcgpmbv	f
+477	cfqaljzak	jvadhagvew	fofjidkqcugeqx	f
+914	nnmbrenjmpxbk	prqgnfpueoligb	dqsothslmv	t
+962	kytwlikvrsvy	lqsxqgziklfhuto	gwrxf	t
+934	xdpppismweqveea	xtkeno	fcuzwzdtsgjsbbv	t
+979	nxxdbxefgo	ugpgqjwrpn	bbvgg	f
+904	kaefvz	qfiqzefvekl	muhseq	f
+915	yfegvsbdy	oadiffkadxvh	mqrzntirkidz	f
+989	vdvjuwtfgzbcr	jyrxtwqnkzv	dfsgum	t
+1006	beaaoneya	gufbcoojeuiqar	gngsib	t
+987	pdzsoghmuxqzg	nkloj	mixzfo	t
+946	alezjaozjgkjve	mhqyxagoe	hlmtivh	t
+1015	ohtccjropysztfq	yitwq	ibamdem	t
+1016	aidhtdrphayyxix	ufvkoxoujibfeo	lakksnctesjriht	t
+1017	dsvjaw	qxgwza	icdbpzziyhxx	t
+1018	huglfcbiyrep	updrpgssuvgaxvb	ooioril	f
+1019	tdxywmbqqqyvfa	teikcbmoow	cgagzpvl	t
+1022	adgix	lfpwgyhlfvnp	nkntryqigowmrm	f
+1023	sxzburtjvwwkio	usvcwvkaeqldokv	ynppcpcbuph	t
+1025	bvbuacz	hkdovcmnewgbtgz	zhmlibdshlk	f
+1026	zxoximfolgvy	dwhteoxicyufddv	ovqqtiktrr	f
+1027	wsdbectgf	quzmunqaton	dcxqwkpfymmg	f
+1029	lmunt	ooikkkuddyobvlc	omptb	t
+1030	nkcwrygkjcuflo	ownjfqu	nkqayhhkfhr	t
+1031	kawsjy	zhaphsuudvvgds	zfkicl	f
+1032	sgfkrmpowweiqcd	kwqeupamdmgzwc	ykfmcjmvychmbvy	f
+1033	gunuyraichxju	dscyg	tvaekkna	t
+1034	uhbngwfgorynue	pydymr	vwojolzwjg	t
+1036	imtldgl	zwcfpuzatvzpnzd	tbuomlgpjckc	f
+1037	sffnieoantegri	yjucc	rxjsmlx	t
+1039	qjkxlaewwnt	cdjejdc	hgydkjycso	f
+1040	lmvpgfal	wquaynmswljqmdb	rvcaecsjz	f
+1044	mgolgabfkcce	plitpioqs	jauzdccexvnn	t
+1045	wmxmrvcfgavcpm	hteez	tjxqmwgfjvn	t
+1047	tyupjb	vtqyfbeznspa	adckhd	t
+1048	vwjnllc	hepgyipmrqaah	aywxfoj	t
+1049	juduxeep	jdqoepqa	btexperzra	f
+1050	phycpfpsfnxub	zuihoavfjqmw	prnza	t
+1051	ogdqi	pgfxmmljvzjq	gfhhijyuzhhkqb	f
+1052	cjasyrc	uoczegp	uqwntyni	f
+1053	hraaxcnd	mbqoshaiednpcfn	ftmvgla	f
+1054	shipsn	vpthyojjxunz	palkoiny	f
+1055	hpqrghimid	cfoji	mcdbuyx	t
+1056	qtinkdlrrg	obioceipytogdyq	weiqrbsgzyfq	t
+1057	qyfanbea	sbjztl	mblbwygryecnrc	f
+1058	dmoiysnmr	frnytkj	wketn	f
+1060	ihivjwcwgejhxtt	vjusob	wjkygpp	f
+1061	uncplpiyfdae	bjamsxryr	mxfnitirmskuvc	f
+1062	djywhdkld	socdhtltsfhxpo	mqiahvfmgpyfuqc	t
+1063	mwepyodmdjuy	tmeexl	pkazzllbhiamdhv	t
+1064	pfxhsmvyr	dfyispboam	dsamansryya	f
+1066	ybutvd	pszrynlcgsamiyx	sacbxxbwtv	f
+1013	hypczgujqtxnobs	azhkqjt	uxgvwmwxpeh	t
+1067	pbcjfpdrxvelq	xcxrdy	xocntupy	f
+992	shxmagggoqifgov	glxxyyblkiet	pbwmbxgynlmxr	f
+1068	yggzthumdaexpy	txmqfetma	ljwcxrk	t
+1069	doiziqjxohxi	gsfcmnpo	fcxpycmlp	t
+1070	mfwsgldzikucrve	xrgdaetkmpuvg	vrgbmakahmfmnwi	t
+1028	etmeqtm	rgenfmdp	lioqxmypo	f
+1071	doqtrvxkvn	jrijynfxdhlpwf	iqpsiiukkjs	t
+1073	xhittdl	xkzllvzl	rjlnrqkvoxgf	f
+1074	lanbwchstxprui	slxvrntoftggtg	fqbbthpnj	f
+1075	ohvlhkjmwtst	sjztrbei	ixqzd	t
+1076	zgxwkgqgpqjc	tapakrqdhgjr	jclawrin	t
+1077	crvdwubodp	qdlyahaenckyap	jznjjk	t
+1079	waldwfade	kmdnvpiv	xopikz	t
+1081	mjcikemrezolncz	kqmwgczdrbtd	qgewdbtforyllbk	f
+1082	yzuhwrjdudsz	ioxyqa	caoec	t
+1083	qcbor	uaatkimumk	jgfktadykiiwc	t
+1084	mvtwwbtc	lfhgk	bxgloyae	t
+1085	eyutiiniobwpqi	bsxtp	zykgj	t
+1087	mmfrycfih	nzcpfkiqab	riauxwwtaoxccfy	t
+1088	erbofzjgxsec	ccczmveupwz	swumnmvgxsd	t
+1089	pptykcsnc	vmofcpc	ptwbxojztxgvyr	f
+1090	uszgsqejhtwzt	qxrnyohsngyc	gfapnxm	f
+1091	nytlreojl	aerjnlsnu	tixpyn	f
+1093	eywrysaqzlma	ebpfglg	xhbez	t
+1094	gggqku	vmwuvtddadkugyo	llmlqualdwfpij	f
+1095	ixkjkmwjsqdxsp	zwgcqfvdzfabg	eyznpxtqsbbia	f
+1096	mvfdmgapudieh	ptkwt	srjduoypivf	t
+1097	wryncm	fenjxqlvjeobnyu	wrvgdxhepkqd	t
+1098	wsgifqazgcbrsus	iibgksddnb	qqfcjvraydvuo	f
+1099	vhxhvuqts	nobzo	twukympela	f
+1100	fsjymlcuh	zlhhjm	hesrskustqok	t
+1101	kgfbfqfwozhu	fkanfbljdkq	gxaqqnuukh	t
+1102	quwptfsfvlfxpkj	yvriwkbd	mtfqinkdw	f
+1103	krobewhrssj	yzkipjr	bzwej	t
+1106	alqxbgukezt	ecifyqzrihnv	eyfhf	t
+1108	vdkkxpqs	pbfkfgdhfibjhen	llubgd	f
+1035	snhvue	tgmuqh	cimkoystgabpfk	t
+1110	ypqvnnt	ldissptygkjfbzf	zdwwxuikknglzn	f
+1111	mpnozuur	bkrytllywiz	owtdhpjhoiaj	f
+1112	atipj	khtprxhodoykz	ewgevlowzliexip	f
+1113	wrfuewnbicmmzik	bpmapxofpoipely	wscejrjmflobkf	f
+1072	nwfxzv	lfsyjpvua	ydgsfcxpla	t
+1114	skpvzft	zytboeizhjv	svizs	t
+1115	ywmrowfwdtb	zerlibnbafydee	pzfhb	f
+1116	uxupocfr	fnhuzkluc	eaknocielpdrd	t
+1117	jpgszuoglogxv	jrjilu	dysdtoxdzoa	f
+1118	kwqhbitojlzhrq	bsomjua	tuscrmctfsulkyx	t
+1119	jnjipiweqqtjd	nhscxlcsd	zyhilrcfnvflimv	t
+1120	nupynmg	cdvoz	jdhtaxezx	f
+1121	ttiqpmzdxfkacc	qvogdkuf	lsafkzpkobzp	t
+1122	cydsbpbn	aaecumxszsy	wohkppsyjyhyy	f
+1123	ilqwdj	sxavvcpedb	wicafiqogs	t
+1124	ehvhivlnnhq	mhjtqtjdtvbarc	pcalxw	f
+1125	dwxbkmu	sebgtvlplnaqa	jwqzerapbzlk	f
+1126	axcpojnae	yhvfpucxehjw	gctjqwozuxoytd	f
+1021	xtslsszesrfpr	nowzbfpweq	kqifcjzbteq	f
+1065	qtjdypnvlst	rjjwoxx	oqrwhzgxvd	f
+1080	lnfnmfs	xhxsxyoo	ebuxh	f
+1086	ltnglqrkckd	ohrqnulbbfj	ykkugvai	f
+1104	exymrkrq	hheybvxvcxafbzy	xfqrdchrnfncufq	t
+1046	uywrktb	eweuymqwtca	ctaytdzlfcdz	f
+1038	fvjypmswhvvy	wabfe	uobdpgsteiv	f
+1041	xsimv	yzctoibezav	hakwbufxpryqzfk	t
+1092	znffxlp	wrnfhlicaulauoc	afqwbcdthfj	t
+1014	xysapq	ldashayuwd	kpcywvsnqggp	f
+1107	yucyxtmukcevtl	uylpdwheqwumk	vuxphctqmtq	f
+1109	mpwti	slkynxwzds	fpkfxxpfnr	f
+1042	zkgdphgawc	ivgitsvhkw	yhgzaihptnxsony	f
+1043	qgwoyqgplpxndt	vitwfxcxisw	ihbymfyskcv	t
+1020	elmswwaggmqg	qmyrrjod	nzbqlftgiscsh	t
+1059	uucczwg	hquypw	ultbgjvljh	t
+1024	emmeoxwzskls	atxzotqfww	bihmojfg	f
+1127	znfkousn	jpmqdblfqfmge	sougsekojtgnzhs	t
+1128	ypqrbvsxio	kghzwcobjchl	lmdrqypq	t
+1129	dfpnqiihhrvph	klaiwussbm	hdfuj	t
+1130	ygidcgq	conayecmiy	scnibriadgb	t
+1131	xlpkob	yqhyhmcapr	igllpcm	t
+1132	qwturzdhxdnt	cuyilrdnbglzdx	ukvheggaphwxx	t
+1133	oggievlyxyuesbp	lshikrkfr	ybpsrwvhrre	t
+1078	ovclywtdyetba	evfpw	bfxcthxgcho	t
+1134	qhjhsqmeuq	iexjvuxbspfbuc	torehffwqvr	t
+1135	jalfdij	cjhgmudvbljdxix	iytptadq	t
+1136	nxbrf	azxqe	ttcksydtmkwgw	f
+1137	oxpcrqwx	xgftr	mmycydwjxed	t
+1138	uqwjqe	cqgruxehq	dznpczaiesvvgya	t
+1139	ynjpt	xjbtuogzmjadt	ziztuddfpjt	f
+1140	rttykrdjunuo	zgvjchikkqbsx	mygsxonxq	f
+1141	mfvua	vounxlofs	zlrxiurdd	t
+1142	gvqlzoor	gyotadqtjsrtwkj	ifvicmhomoau	f
+1143	plpwm	snfjwunfk	zriqfsxpfp	t
+1144	hptbdrefigj	dkonb	rrzugowtvxw	f
+1145	qbvrpk	jvclqrn	tamegdjg	t
+1146	nrgcetwz	swiwnobve	islhoacbnu	t
+1147	jjgbekxllinr	ddqwfujlxhafbpt	ppfvh	t
+1148	ndgguofbahend	cdughek	ohxmrithywczz	f
+1149	rxnpuxwsnmaym	cuvcxndru	fctieyr	t
+1150	gprppdygplwt	akgpcijrlih	urxfhdfs	t
+1151	aygpwus	xzfedpqyhyeteij	rhanbcyas	t
+1152	ehwqyddsomcofm	eulmgpwisfgqej	ejbsa	f
+1154	publkekq	eokahthegepep	xrelycskcktnnt	f
+1155	fykqfdln	gogqahdiqevnqpj	yfaylev	t
+1156	tdbjeocxtl	fhexy	giynj	t
+1157	zyghxqwodzlqq	jarktjdsf	cuyzjexxfajbf	f
+1158	vtwuxfxywdpa	dlhntyeqcv	ogoyds	t
+1160	lkqpgc	hegleeu	kspswmdohvzqwy	t
+1161	rmyzg	kgracnzflbu	rfimafkxmlh	f
+1162	yxwgktdlckkdssj	zszpzlrwpnnia	xdfrrgnoturu	f
+1164	hnhhwgreubm	qqcebwmk	olkzugb	t
+1165	maojxz	bjssrbndlfbbvvz	lvcywapentx	t
+1166	bhxscpqwijs	eqmigysrbkqlzn	dxsjsjn	t
+1167	ulajw	hctrpuxgreiosu	csqqhlpgd	f
+1168	ufzfag	smexkshqmqmzo	unizwp	t
+1169	puxeunkpiujd	cukmdvry	rswtnttnyuyiah	t
+1170	izsrqpmaogqnmr	dkbajtfgq	mxdnappahwoak	t
+513	fjavtuumx	koqdmsftfzfks	subgizypdyyb	t
+1171	ofczerktbvvahh	kxhofzkel	lqtnqmp	t
+1172	hmwqhno	kvolhekk	uqkvbffzotgb	t
+1173	dmynmyuhgtnlibj	tvuxdfxi	mmpyru	t
+157	wemwlsmtgvuz	ooerzdfinv	axiizdsspsxhp	f
+1174	itiuyzkusng	idton	hutfsy	f
+1176	qlrdtmqijwinrh	ncegr	emjkivxf	t
+1178	gsyhvynnq	msudyura	jyvuz	t
+1179	ulrhhxbpwytgml	jqjlzddxtzouxs	xentmbea	t
+1180	qturolkhiy	uglzhe	wgzhdnvquswxjvj	t
+1182	xqnte	bbblqd	vmtmteg	f
+1183	bzmuthxk	cmwserfxe	nghybxlhpfxmec	t
+1184	wetrcgdblcnxv	zntnnhleaepfmzl	evmgt	t
+1185	bpgdb	hvvjbcqgefgi	gfykwxu	t
+1186	jpnwviii	tupeh	gxzzgdtgrlbev	t
+1187	wohztdbanvs	tbskovu	mmnmycfrjkczji	t
+1188	ppplzxtl	pszadtp	erptyain	t
+1189	nbgilal	ugulnxjf	pcordsx	t
+1190	knzzglxomnqcibh	syvhncbgamdbpo	hztxeivgf	f
+1191	fvsnnkzypgwt	jjpvicukngmrwbm	lkvjkrqhywbfcm	f
+1181	ojlzhfnuhuf	rkdbuwzbq	klxpspeljwyvl	t
+1192	uboccwn	tixjwltucjktw	qotqeheu	f
+1193	swhmobdxcsamy	lhhgufnop	uojvwk	f
+1194	jitvrbjviogudsk	pxlxxeygumi	hoejzkw	t
+1175	bxtvxcdhdehv	wqhvpprtioxa	zgfsvelgdj	t
+1159	osyegvozkaggn	iltvbjj	mvglwdonxx	f
+1195	phgydt	daezvjeohbofi	tctxtihcwio	t
+1196	wkccgh	tmkrrqpkb	ljsmhm	t
+1197	vegdpcjkidhai	pctluohqqd	lwngrrosd	t
+582	dmixaysszoqgjp	kuuxnrlxbkfsm	xsgmeckzjmjlvv	t
+1198	mwfyefjli	jzeyovcuyw	otuozznqwob	f
+1199	hfmgseddijwpw	fdclyaco	brwxlszzqs	f
+1200	fsoglhvt	sfhvjzbdbatk	haqgricdnkuompe	f
+1105	nocakufqvpnbb	iagldgiaadlhpv	grjcybvato	f
+1201	vxeoq	wtgebfbucqtqt	qpsqqqbqsawppio	f
+1203	blihihvbogy	gvcuwblpovmfi	gtjwn	t
+1204	dxqhj	ugofzqrdnfci	pnlsbtbpfuohf	t
+1205	lmonikkqgknfrrp	lcivci	oknkmlhpjqtv	t
+1206	zjizzrcvyeqj	hzgdkbojn	dwbjvydlwoaui	f
+1207	tpyllluqufdpy	wxssyfapmpkciyc	jrdkgd	t
+1208	ihlgbwbpyr	pdwhngcvixrvsh	ezvgwdtybiub	f
+1209	bnclwwoeoc	ztxovpb	byqai	f
+1210	jifivexzayipmcs	judaflhsiq	evgfu	f
+1211	jtmcnbljfgsczco	inayha	uuhdt	t
+1212	nqrqxyzbdvxdz	kajdci	vumrnkio	f
+1213	qihqwpjau	qsazfwr	sbswngpk	f
+1153	yokax	tilxeapjcdi	psxhsipiepxvref	f
+1214	uwlmg	tholltvjp	zevjuivjbsns	t
+1215	trmcunt	sdscreimmv	omptcq	f
+1216	cjvjywu	coytepsxprh	wffjhzzirxmv	t
+1217	lireeuucry	xamwpfg	mudeikcomu	t
+1218	jihji	pqkpsvceqhj	axgcbids	f
+1219	beakxq	akcsmxizcjnzafz	yxbjufdafgm	f
+1220	pobqkgv	eroaimj	whwsidmstvg	f
+1221	htotukhajdeopag	laztxgljpkzqto	nvmqpvwygoagr	t
+1222	iyjkpfpzci	vhgcicng	ruisplxbtmaf	t
+1223	zkdnsjoqwrded	yfyppd	ingtvzsgiwb	f
+1202	tgojqzxwvzau	rqxmw	zxsqix	t
+1224	lqcqrs	zznmhoxtdfjtda	gwozg	f
+1225	htkyvcqdnjpcwd	wqkmpclxtqpahv	pjeqwbc	t
+1227	wawnlqtrwx	neiiwgkj	krcbmkduuflxni	t
+1228	oedpr	iemxzop	ccqyhiquozbmkdh	t
+1229	lzpvq	ezgqnuvsbmrpkq	bjuclox	f
+1230	wmbaqul	elyuxdlmd	jufaye	f
+1231	qbraxafvntj	zgitlxpgvl	ppnqnxtfbc	f
+1232	obqxryqrcg	jexib	dmtccwtlpvzyxhj	f
+1233	mwvatyuoaunmqtz	btksxzdv	fhfjchfuof	f
+1234	nmsjacf	kojzu	uyvjmpz	t
+1235	jilkmquy	wxlmxh	lbeqrqxeopuldsm	f
+1236	nikcq	mafeobrnwnfqm	cuhiwmcztw	t
+1237	zrjskqgqdxo	ouzsuawgpcwyqx	qcoilxzfjwvltd	t
+1238	qjngzzdjekryy	wzxvk	erwncqnktpov	t
+1226	uecylx	vyzforrxxpmfm	kyheellgvczovt	t
+1163	jldypsksphhengg	fizicoxyszzfuju	brbcncfcnofts	f
+1239	zxwlxadzsx	kteuflo	jhyoydzbihvyd	t
+1177	wjxmfgc	xefoux	ewtwihvjw	t
+1240	jobglp	jeqfadt	xmjxfkjtorlt	f
+1241	hmdmcahxdkze	kagnmcu	qrkjejadssifvil	t
+1242	iseyqz	ncmtoprtnoc	eqrxwpvrtclfed	f
+1243	xwtcdyjg	jqvzjmiqgbltmj	tgszpwcn	f
+1244	cayxfj	heoigymxsskye	gxxpglo	f
+1245	iqiwh	zloixduej	amdjftkjjxiib	t
+1246	laigrstf	zmgwf	fdwawd	f
+1247	dxlrql	yawokhzneo	wtbwobmzkgnn	f
+1248	jkwju	etonrnq	codyxh	t
+1249	ytpcv	wrydevslsfhczv	zbgmiqsdfgg	f
+1251	alkncx	ffqucnseshgghs	haqwttcwtdnwwlb	f
+435	bidpqxmz	gexqzwyoc	zsfhjjso	f
+1252	jrwuzxeuwnrtvz	fapfmeulfopnrt	fmcwj	t
+1253	rlamxnjyfsxwkn	dejpa	phlqvkkeedase	f
+1254	rqmlhaalxrg	eyuqvxxnffizp	upwuqzels	t
+1255	iglkd	nzrhilqwsgak	wwwovmbyepbtk	t
+1256	keggmzs	iocyfh	tjkgp	f
+1257	vsuokhtkohex	tgtpvbxofald	qhljbpzzoql	f
+858	tesbxm	kopqvqgnugxqm	ygtcdoq	f
+1258	vjdhp	xjngppcmcd	wakhvhqpqxp	t
+1259	ffgewfajfp	avayo	xsvjiiffp	t
+1260	lvjkvxjgfg	zijxol	zmttrww	t
+1261	jigqnxufyzcfkxw	frpuqnpiofedh	gaxcxvpmkpxsppj	f
+1262	sqhxarjdufcy	kqarnncfqwdradi	tutqgajhe	t
+1263	bbgfba	dapaofobbvgf	rushxkfk	f
+1264	wcxtkzfbuog	gxplhptevcqrvh	sgmgqu	f
+1250	ghvxvuzdm	xaxawvgzaidaxig	rdgazbzcn	f
+1265	vzpryfwlgzpnux	ufqjkqslb	xwucoldka	f
+1266	awiudziqsbrmql	txdnodfyzpdze	wkenq	f
+1267	akohifejdber	qkeiyuogqgu	ncgyhxoxzgwvbo	t
+1268	gpzxxbz	quzasylihipdr	fjzjuq	f
+1269	yooswusarqnk	ylbmprjatsds	wdpwjtlkkhd	f
+1270	vswjumg	jekrqcmsbpvzo	rpltk	t
+1271	cswbdmdraj	pekavxdxkvay	yjqbrsbaqer	f
+1272	xxxcxikawn	geoffwpjgvmby	ulypypx	f
+1273	rblawnjxbjub	cdzolnauvrxiyij	tyagtnxcm	t
+1274	tpezzgee	pzyzhlnyckhtk	agufxqsemyyaep	t
+2549	z	izrjrcghlcsegyrj	qiyvwb	f
+687	zgrtzlybu	zqmt	wscdidyikjyeam	t
+3825	hhjcftgvtcprrelfedr	npipbkbquno	ux	f
+75	tovgr	vmaguuibzuwc	pakexent	t
+5102	cr	savhk	i	t
+733	ycrqlitos	ejrkuswohbhpiew	mdvfwvsnkesjoy	f
+\.
+
+
+--
+-- Name: customer_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
+--
+
+SELECT pg_catalog.setval('public.customer_id_seq', 5102, true);
+
+
+--
+-- Data for Name: product; Type: TABLE DATA; Schema: public; Owner: testuser
+--
+
+COPY public.product (id, name, cost, amount) FROM stdin;
+134	dtvyezmf	404	8928
+80	zndlqntws	805	3304
+79	aosixq	45	1804
+116	mmzissaqifr	523	5433
+86	icexntya	344	6788
+65	cjxhljyxtcjgju	359	6131
+25	uumguvf	877	5271
+108	kolclfmxx	567	1925
+44	zecvrh	702	1885
+109	bpqvoarqhp	130	8391
+11	srzepgvdc	337	7408
+82	drbab	245	1441
+101	ffrukn	795	3115
+105	anlwfznnfephmph	528	8340
+14	onwsisc	66	7034
+58	jqntyciayg	746	9631
+38	rnanohsmm	93	3529
+17	sboxpwk	154	2239
+142	xnctwderbv	277	9271
+7	leggyjr	515	7809
+74	sxabd	442	2426
+128	vdsxmsmsktfjjg	912	2861
+99	bplulnje	698	9271
+114	hkvkworaiii	127	702
+85	yvnxlbuprcl	128	9494
+93	gtavapru	738	6390
+135	xkeyeuwiu	853	2070
+75	ggftkhemfqvrmsz	397	4719
+9	ikwegidg	908	9084
+3	cwregrhvhnkgn	397	5890
+96	incdrxyujl	409	6051
+62	sdyxpmbtnumtuh	503	1785
+27	tclwqbuodhwgbr	963	1087
+102	gkxvb	395	285
+64	dalskui	486	9119
+132	iichddj	562	1303
+55	topjlxwdkuxpue	837	9378
+10	jurraonejdu	81	2935
+46	nweod	438	424
+54	pcabcymckvgfnpe	683	2911
+28	itpnukbhuduwgjk	612	6153
+94	nwaimjkvleihqco	189	2910
+23	vuoszqhdjtxfu	231	281
+35	swyjabdsjpeqh	418	210
+141	qdpolamozap	857	7949
+18	rzpuliwyqhojj	454	5378
+22	vnbyklhnyyyqzxf	804	8987
+95	mmohatemxuzq	659	7340
+98	uvtgdjuspqsn	295	3923
+19	ckwsjjssypjm	134	8352
+24	flltzywy	701	2983
+60	loupzwwkhyyx	801	5770
+69	hqqrllvuytircb	105	9770
+100	srsciiudu	626	4311
+59	jcilqt	214	6807
+8	frfsxurdowxuc	249	9543
+77	byhlqcaugb	991	8945
+119	hwgqthhwchkgd	664	5877
+97	axkmnzugfp	714	9296
+122	xwtaqclokdvj	975	6788
+103	dlsen	904	7136
+91	xlyhjegjq	362	4790
+41	vqzbplortofct	493	7546
+87	apjyphrqx	236	8317
+2	vrsgsjvwid	314	1210
+53	mvqkwbdt	120	928
+30	pqikqzh	663	568
+111	maknecmn	176	3032
+20	onmhx	682	7426
+143	eehdymyrnm	867	4096
+83	wwoiilhfwggrq	275	9737
+124	mlwmuugy	193	9337
+63	zdqvekoueueb	98	1115
+92	mohstvjm	534	8434
+21	cnmcnn	757	3783
+70	svlcj	322	5071
+52	ntmetxarudslm	270	9037
+31	vmxdc	957	186
+34	wzpxunykv	89	8982
+76	nwovrzmlf	141	7283
+113	dtrtgpgjof	106	8560
+138	cpazvbiouul	106	4173
+68	gshmjyn	210	113
+71	hyhuo	919	5005
+118	wqztmktklblaw	583	6377
+1	kekfdhh	302	3767
+13	mhhaaicoc	905	718
+73	nxwhy	964	5828
+50	qlusiyocqo	255	1587
+106	zbuvpdutcocjczm	3	9491
+48	qtvyiwyazaortfi	61	9363
+112	ulvwfsc	523	6258
+42	pbzthauul	883	9803
+45	sdwdhvjmjw	864	9691
+120	cayzondlqcfrjl	489	6216
+29	euyjidqwqrkrw	68	2556
+131	pbkzaonaznyncq	751	9897
+51	vditljanqxinyo	434	2235
+16	ldydhjdoyfqc	221	8929
+40	wmeoxacq	810	6587
+37	pmhpqkvwqprd	22	3678
+130	witxzdftpfl	580	4388
+49	jjzwmddn	762	3667
+78	btdku	100	9406
+137	xhykudiapfvlc	837	7228
+32	qhwiim	136	5652
+125	dsytycvodyzpf	974	3117
+133	zmtizctot	733	3288
+117	hwdzcevxehlkdn	556	79
+107	teonzslumsfgdw	147	6620
+81	veuqjt	395	1977
+110	wfcgmfgyhxcka	647	2529
+33	mutstvrfczskhw	228	8025
+139	xacrwhhxfwx	445	3620
+12	jeimrvzcdl	304	5881
+88	imdhpl	365	475
+127	sejxvkggmmoh	141	8419
+4	ukdwyymkti	653	3319
+121	ormioaeizhssobg	465	7821
+47	rycqr	653	4294
+129	kirdrjuyyb	394	3334
+67	vbwoynoz	578	4903
+72	zogto	671	9609
+104	vjtvuzkub	515	3804
+115	qfhipchxqmvsob	232	5979
+5	yxmcctaj	51	1602
+66	srfismyev	684	452
+89	jzhjmiwqbcrvk	125	4200
+140	fvxendqlz	311	6720
+43	owhbdrhakbl	487	8238
+56	zgmkg	544	8514
+90	bejqb	731	343
+57	czbqq	177	2025
+136	znlatdvzhny	301	4611
+39	drpmlsb	984	7807
+15	uuocpf	286	2937
+6	nyyatddwyszaehz	277	5273
+158	snwlffeoruzsdep	103	8474
+159	rtlinaq	546	8613
+190	pkvvopmai	111	4607
+167	rrywtkbqgeplmtb	782	1033
+36	fzbpgjgubdww	485	5508
+168	ctjqufj	150	2182
+181	wcvjjfdjzygl	711	9730
+253	roloa	954	7727
+188	sqnhy	775	3342
+263	qaizx	950	7322
+252	nheoqdeo	469	6399
+192	tybivlfd	912	5856
+173	bjvctuaf	765	1005
+154	owthednpqpoknxr	840	9357
+194	mgfezjsg	159	7957
+205	ufpjjfeafydksmu	73	4785
+153	narxwrtwiej	600	4832
+210	onhyizuzdx	651	6018
+282	wzwrnp	194	9762
+222	qhmkaobigkozjrq	189	1291
+260	vtpsarnhy	16	8477
+163	webdajujkfsdiao	731	3317
+270	nozkb	338	2697
+144	nchgzawkmscs	286	6641
+156	hymyrni	978	506
+215	iqjsnkefzefv	625	2627
+217	fvbskusrqcxgpav	123	2530
+237	iksvdlgrnacjzs	849	7265
+162	vinpbzqkgxvdi	427	8449
+223	vkdkaign	998	2132
+201	ihhhmq	751	7190
+226	nrcvxazxnewifg	160	9873
+202	tmjhmtojfmqsx	825	9700
+184	zfkkjvr	831	170
+228	ypdpodbcpswgdj	656	177
+208	ppacqxltczd	643	7421
+182	yizxeynibyyhmpk	405	5363
+221	utkmayea	957	1991
+231	lfbvrlgrm	324	8986
+233	untmrwh	971	2358
+220	ofmkp	414	8643
+203	doeaoz	922	2526
+232	wzgjwggzgci	360	6663
+199	hqgslxdddi	645	1891
+179	fivsru	676	3257
+249	osksgajgakpvqc	937	5744
+251	wcnklacioih	304	1726
+186	iymkuqlzcwvc	123	3251
+254	tlmwixnzpusugdk	514	5857
+256	dcuvcanjicwpy	344	497
+259	lbcuslo	54	7552
+264	hvdufzjhkesi	692	2795
+219	xhnsjkdhxi	243	8762
+198	qbnojwjvll	158	3708
+275	vubzbhgpr	229	8787
+245	jtjqu	572	9084
+180	kislifnecnnld	926	6885
+276	xvhrxh	667	1015
+171	urtezjuoysrrpb	635	8308
+283	dfybh	128	8609
+257	xszqmd	327	6407
+277	rzoccup	479	7639
+178	tllxjst	360	996
+274	nfnykoqorcaqdo	219	7723
+164	ipjrvgtpelcoi	804	4200
+242	rdpzv	751	3789
+146	ndbjwprwfqb	129	5922
+196	jmdsjlynfie	74	6880
+273	lycqqjocd	775	7108
+238	ddwvzimvdoiejlp	255	5310
+170	ytctw	198	8835
+230	lxxglo	246	752
+200	rwpjyhxmmugol	215	3524
+218	wgejgkcuo	600	516
+160	vqwlcowawatp	72	1913
+187	bwpvzs	587	447
+244	jmhzjsngij	472	459
+169	zcsflmd	688	6280
+155	sjoevdeust	240	6807
+250	xsqiwbociixhdv	686	5829
+229	niujfxpihcgl	437	1457
+248	efdnhxlxbvqph	322	293
+152	mjiitjqow	912	204
+177	esmjphvtgzaxv	666	107
+151	lxvbbhf	508	740
+175	lsfseczcpqyp	817	9806
+279	xbaoagmgv	454	9022
+271	wxszkgpvizrjabg	130	1306
+147	qnnhbyxk	634	6975
+234	yssncfwztcv	115	3706
+123	wuohckdnedgqgdu	882	2251
+148	ekeecxntzr	66	2149
+166	vemofzszne	328	2561
+239	ntogseukltjtkw	30	947
+247	kwgrvaqhwx	894	6812
+281	gzminodcqhqweri	608	2448
+227	qvsivoncgunem	513	2997
+149	gqitbtitasexjzu	164	3099
+183	thdyetb	516	2245
+176	jqumqxmemjj	490	7682
+189	luyewp	977	5791
+265	yyozifrxgkxif	578	8525
+216	uclwoua	36	142
+209	ippzrtynwa	479	9347
+284	obhxikqljjwb	614	3977
+214	cwonxzezygs	342	371
+280	uyvgdhhdri	71	1941
+84	yftwtzndmmtsj	168	9109
+157	noxtacj	315	7049
+261	tascwysxfgosawy	869	3436
+174	hnrxvppgue	630	2740
+206	hcpgfkqp	40	4641
+165	nkzlszdimww	582	6774
+191	nqqcu	563	9508
+236	avybrt	584	3112
+240	qjvspjwu	668	7081
+207	kqjiirvnzipjglu	74	8256
+258	wzgzdxkgwcfirn	390	4634
+267	lttljyww	230	2073
+255	kxnumrvawfnn	942	9719
+262	bfserdqckennyuq	477	4024
+150	pdsauomqlyxrxxw	799	8714
+172	xjcxtrdtykm	27	9675
+195	skhizpouczqlxza	684	2861
+272	crmtnmmtxnjnbkf	454	6502
+225	uksnwaccjaxfmiz	186	928
+185	ksebed	407	8872
+269	irqoyr	313	5492
+213	zkxdhp	188	6455
+211	gymlssvfssrep	30	2942
+243	awjohccbllu	758	5153
+204	mutlpypfhgy	948	2733
+197	vknlct	952	1510
+161	wnoaxtjzgbgpgtn	355	9175
+278	jkxqx	390	172
+268	nwhvzhwceokbcz	295	9990
+224	gfyrqqphenmxvju	710	8730
+235	skhalth	272	8122
+297	wtpuvcpxozg	756	1176
+301	romfi	772	7112
+302	valxkfbkom	678	3257
+288	szjrcsnmwr	135	9348
+307	ovrfb	477	3981
+308	gvqlkpoyev	20	1395
+425	mhzgtxawaqgtdcu	6	1418
+316	bulgaxchiiafuq	474	8330
+320	lpbxbiikwlnz	288	7313
+323	ibocyejtjviwzt	662	8999
+266	wfdsqewlwqrrmbg	161	4057
+327	jooqg	350	9069
+404	iawwviwcgmviaan	185	2656
+330	qsvkxfwcxjmhp	750	652
+332	jjbeooldjdj	919	3996
+384	cdakoobvdctaw	75	5874
+337	bjfpv	376	7678
+291	foowlftcruk	250	6936
+342	gupbuyssncfwq	304	9968
+326	womwzw	610	6500
+423	wgvzl	202	2428
+349	hgewoqyg	335	1911
+296	qvciils	0	2647
+350	uaiwjly	570	8488
+353	qxyqcetvvwtj	391	6426
+354	bcxzhdvv	406	5714
+356	sjahanpcef	84	52
+369	lfnzvddtryw	811	3297
+357	zcavqjpzrte	471	4501
+358	vusybykaggxfs	49	4356
+360	dkhum	88	4439
+362	kyehthdebc	920	5979
+363	nsxwssflwdlbqqb	653	9256
+366	zoogxp	787	5095
+328	bcxpagjaxc	939	1438
+371	uvedhrm	206	989
+313	icybi	206	7752
+380	svabsa	801	168
+382	fvhmt	489	4658
+383	fkxvfraq	831	1267
+386	tvpdabynwetaske	755	6105
+387	xhiwuqxsx	742	4067
+424	tinifk	788	6029
+388	jodugdgv	813	4454
+304	hjpbnwgx	977	7289
+393	iahybdct	566	5087
+394	szquuvaqkwoxr	366	5747
+405	afkzduluxxn	503	6529
+365	xlstrczrgkdrlx	819	4572
+409	kdqmrcocubhgvji	229	5361
+413	ckijiily	763	4808
+414	tsmrgruvuyk	221	5944
+415	gjapejieatg	215	9934
+416	wyyuliicaerp	675	2925
+417	fkvhiua	636	9396
+418	kkruekmyltozuos	286	1256
+419	dvqvpvt	720	4459
+422	dusdpnws	837	4133
+345	uxbyw	919	7354
+344	ezblmwpqo	822	4737
+355	ghvkxi	644	9098
+352	jzzhriamsludlr	816	4918
+374	mudpzxk	440	5099
+421	ndssjzlf	629	618
+412	skpwevskzcbjnx	844	7995
+346	sqmuj	418	5890
+373	mrxwstqri	716	8763
+396	jjjczgxuvng	500	8553
+325	lkbzboutuzg	213	9379
+293	inebwpt	126	7056
+381	zzdwhvgmqtgw	796	7105
+314	mvtwy	678	1480
+378	ncslguuy	578	1581
+391	xmpogk	409	8262
+408	sxhjbhjsdsqu	161	4145
+428	zvismpin	775	5711
+319	jehlqrvsdd	240	5781
+324	bbuws	157	2672
+315	mguzhcjzjm	133	2711
+311	qkkmcg	78	3865
+368	urypflfyhjtchiv	561	869
+395	wrvlwiyts	180	7358
+403	onaytqm	158	8782
+372	sotlsgjpjyofsxc	935	7612
+410	hjpdx	136	9244
+309	kgvxc	421	5131
+348	fnbylmme	457	3822
+427	pcphd	32	4583
+335	qrmyn	110	434
+310	kwikuezkmvkt	913	103
+285	qagqvjokvckhi	568	582
+426	zmunths	670	2507
+398	hjvrhs	108	7527
+364	clvhxfzmplry	677	6948
+379	cnqluqkhi	933	4353
+294	ruyal	398	6226
+317	uuubfhrm	581	9249
+341	bntxrap	139	188
+193	wyxdilptwa	359	9618
+290	mrgvdlxukc	6	2265
+385	uapaibf	943	7965
+287	fkups	86	9998
+312	lyftvvfjuke	849	3741
+343	eqtzrlkuewaooeq	297	6307
+375	wlzivflszgf	382	6015
+300	ruyynzzydrdw	302	8757
+400	nuqydzj	618	8656
+333	aadmammhzarjsam	760	527
+397	osysqhfyyrd	566	3164
+303	awrsocs	797	5413
+402	mcexbmliuua	707	8572
+340	uhjedcjqlfdrtnl	672	2146
+389	bosejpzphfqeu	544	7058
+347	tvqyjlmncnv	292	9146
+334	rvtieobfogyd	346	4009
+377	fvslaoskpezlfq	827	6710
+306	buaoawhmibe	488	8859
+367	umfiwabqruncf	838	2056
+299	cwzspwkfwml	719	1136
+361	kojfhzwk	592	9756
+390	ujaslv	85	6591
+338	sppnknqjqxlj	288	9322
+305	ykqtns	276	1664
+292	netmjtdng	913	9144
+370	uyguyatqt	329	1410
+359	bdriivyjrdxp	946	3206
+329	bkodmuftwobc	122	7967
+298	ukkwp	562	4148
+322	cjmyx	12	3657
+406	imxsyn	144	987
+61	ngmfktsadmvga	960	9921
+376	krhml	107	3548
+286	vsqomjahftrd	11	9987
+336	jmwxatmvje	224	4242
+318	sockewqtf	502	9977
+420	jrcuhfkf	513	1090
+331	lkolmg	926	1235
+392	zbfwvjikmsyqvbs	906	9015
+289	rphti	988	6832
+295	gghvobeqka	455	5181
+321	wgmmrfiuk	372	7077
+431	rajwl	765	2494
+434	oqicfsjueu	402	4265
+437	pytxepxt	816	4430
+444	ytilyrrm	506	9295
+454	kklzigctzhcgoc	418	858
+436	jxnknzfidsd	426	3674
+462	mgifhnqye	322	5570
+433	rwnhej	219	5440
+464	fbjsw	646	7288
+466	gliymhiefkun	490	6251
+467	wkkjvaztdppgqg	870	4661
+469	xxyunruvrz	206	9747
+528	kxtkouylgxlbvfa	384	2925
+473	fgpjtwqvam	854	2381
+477	sfsagfsivvh	423	3336
+478	bdarkwjze	603	2859
+479	rigxvhxnvq	316	8027
+480	bfevjcsei	48	5769
+447	icstpuy	429	3886
+486	hybmolqo	958	8650
+487	qmasg	619	2842
+488	iileicheoquomb	592	9539
+489	xqbvgeff	477	3167
+439	esnphbo	812	459
+519	jukbrqpexksgriq	310	3081
+537	yqybzdfhughwl	406	9341
+495	gotkaxnbgdkr	113	5984
+499	yivnjmmfc	824	6470
+502	ousfazxuaokmnl	982	1841
+449	snyireasvem	723	2501
+494	asdykticpsr	657	3945
+446	mkqczg	700	6269
+490	crpyuxypvqxvdt	246	3162
+527	weozwkk	572	321
+212	sgcfwwdxgcpkj	310	5770
+516	xawkd	677	2131
+507	mwxvrmket	997	4096
+510	bvcumlgkheob	324	2104
+512	qadttra	793	2908
+534	oljedweswqvt	345	2012
+513	ktxgfwmtylxf	348	4901
+515	tzlpdxej	676	7272
+517	rzwbjgimy	753	5069
+518	xqhiopifdxgu	284	4718
+521	iwbrufdjo	9	7520
+445	kscmzyxrucp	576	400
+522	tagyggjjakpn	562	491
+523	qakhgapvdq	529	4335
+525	vgfksoqxrpmpb	645	646
+526	iaiphut	758	5129
+529	xssqvnafxly	834	2975
+531	ifsxrgewwirx	902	4864
+474	mynlabsiieaxzii	17	9176
+532	kulyr	669	8709
+442	fiwlyhm	604	7418
+556	gljra	282	3783
+457	womajgbp	329	1533
+538	ljpixvohxllj	421	8068
+539	aoxagn	27	256
+533	vvlhzhgtqtbc	942	9616
+544	ehgea	741	5896
+545	lobdxlx	225	4533
+126	fsjkdejyczhie	18	1497
+548	vwzier	843	6085
+549	hyvwdvngayctxi	383	8246
+552	glauopcuqfdq	423	561
+553	sinujwwemka	412	3537
+555	wdrmpselgofprjr	779	6371
+557	cidicsinsak	819	6261
+559	ukycfykbjci	540	4410
+520	mqnbzuy	881	8003
+558	kjdxyhutweo	700	7693
+562	mbpsmvpwx	382	4227
+563	orqcrxrmycubqnq	602	4203
+443	jsrtq	495	4235
+566	ojpmbnobgmusjo	881	979
+567	nrrarchzpyjwotq	795	7624
+506	udkryog	698	6017
+554	euhztptvw	536	201
+493	gkwfxzbcgceguhl	580	3186
+465	toskuwv	306	5242
+461	yqxrunmk	989	2818
+453	bzcidja	90	1042
+514	izktmvvmkmm	677	3304
+351	eitpubziuqde	804	1824
+536	qavfzk	421	443
+540	uqhxojagqkkxa	827	3533
+452	ntbeppjtwqioe	879	6705
+565	vjdbgezipcfr	625	2879
+560	vpisugnsjq	949	544
+483	roaxkkgtgdipsp	277	6983
+541	ydkinvceco	677	9231
+491	kjjks	946	5150
+399	xnftgupvnnhozil	656	8815
+547	cgosfjopala	199	5945
+458	wilpznb	652	9644
+546	sjdqw	814	8209
+551	fxiuftxtgoj	795	4641
+497	pahwpsodrc	559	9698
+430	kkvcihxk	592	4925
+484	dgkkhhaumibwbhe	914	5993
+450	zfvcqnjprbrjujk	477	918
+475	ututjgbtci	464	7602
+455	fzhlvsaxqam	289	4803
+501	nrrvirsf	41	307
+435	xmglyqytabc	474	7558
+530	narrhalzfy	8	6402
+542	sdmvouaimxyr	431	4340
+246	yodlfpcvbwsmqy	528	4152
+485	nsonr	656	4363
+503	fvfpcnml	457	6796
+472	juhiem	752	9444
+468	tszgqqvewinup	473	254
+535	ffowayoejwcdt	548	2694
+508	dvghmbmzyb	102	4179
+463	btvqwi	918	3904
+482	mpbaknanx	524	4394
+492	oswryzuw	390	3014
+429	esxvwrcrus	757	6277
+509	mcfgaekdsfsfo	369	9281
+543	anuodqqylbnw	722	5246
+511	uucxchnkiz	170	7577
+460	njpvqaqqfuv	602	3893
+456	dgtdna	142	8973
+550	tbmuhbgtcdn	351	9535
+481	wymkfeundqtn	8	4021
+564	gylyknupcc	993	7750
+496	padggfehbseqr	487	4487
+438	auvlkginlgny	296	4506
+459	tfomgszp	338	1000
+470	dkixhfznpxwyi	883	3872
+432	ubbizx	347	669
+471	xijpxaxcfedg	695	9483
+451	uptkia	888	4321
+498	odepp	580	8801
+561	labzn	192	7077
+500	rbmzow	882	5844
+504	nnsly	7	1147
+476	pgsvzozsxpquwwh	421	626
+440	hqisbuitotdn	708	969
+571	ncfogmiecnpzlu	419	9207
+575	wrtavbcvbrmhv	491	5270
+576	elmtnuxeumurmv	296	8328
+579	fqrnw	291	2247
+580	gpdyj	80	4755
+581	konvzxltyamms	293	407
+586	ieald	851	2640
+587	pexnjkaqh	596	3545
+588	stnnnkhu	6	7285
+677	kupnyweluha	742	608
+596	veoyg	989	6487
+597	odhectwxnnbxwjo	618	3586
+599	hoide	77	2820
+600	scmgell	698	4044
+601	cbojgtabgy	881	9285
+602	nwzepycoikruzgd	178	214
+605	zlzmcrwojziofw	235	653
+607	emefbazfwbtlovs	65	3726
+594	vwihmj	823	6729
+610	nilvqngnhxcmjud	270	704
+611	shudetnorvlmes	279	6833
+613	pldwqgxurxtykzq	641	7688
+614	kvbnssgbsfwxrx	993	234
+615	exdwtjfliwndi	811	7611
+616	glrjqzv	590	482
+617	pqfcdohwzu	721	6927
+583	gjxrmrsrysxp	251	2322
+621	ttxpwqcpjckkl	659	8493
+622	vqzzotfmsxr	747	9566
+623	mzbmlwfcy	510	4466
+624	oiaweuph	196	6453
+628	owgvvcsrey	685	4628
+629	oxyluvghrtifla	665	9841
+630	hurcpk	492	5513
+631	ixiopzt	997	2757
+633	tgajpubbvigaf	857	249
+635	mjdepm	697	2802
+639	exanlfhvwt	501	3375
+642	eecivfvfqvawy	910	8549
+643	yumscltqn	909	5617
+644	rkhzggnncfi	551	4505
+662	soqlu	65	8633
+645	qthiwc	834	5035
+646	fcmocerduqafex	524	601
+649	dqhnwgc	691	4249
+651	cmlpy	435	4115
+569	vfiqtkpdohcox	605	9192
+654	xexwcvxtimnnnux	860	3799
+653	gtvfli	594	4455
+657	vnfjyswzo	140	9323
+658	llgzqmrnflliycm	67	3091
+660	pmjhdsn	163	7533
+568	ozhperdmirteb	684	9288
+663	totkehwzuxc	64	2411
+666	rmatdzpyomjbcmh	663	1640
+667	mubpff	862	8751
+668	cfuekvhorfshts	93	6497
+241	moyoygkrpnitnzr	281	1720
+670	jnfxyrlmn	34	1289
+694	fmecr	196	1369
+673	qnwyubktuap	912	7477
+674	qaodcaqkk	85	6759
+675	bkbvhalsp	299	4336
+676	zjyjhdz	656	4628
+682	gbveshzpo	873	1994
+683	tgyclzwpj	512	3802
+685	nuofxklyaywc	410	683
+687	huelhtmiqfvhm	747	9125
+690	npvgrrbv	980	7378
+659	ffpvmirxqgdqss	267	7162
+665	urneegl	444	3500
+696	qmxjhkotetwevsn	898	197
+697	zggvfawdfl	249	6376
+700	cmihlr	331	3030
+701	ekwbjl	6	7175
+702	ntfpjrxco	134	2529
+703	kgmaet	456	2611
+704	hcezkvmvgq	749	564
+706	qvbaecibeh	566	2473
+707	fezsizlbvsxkx	632	5570
+708	axvxiiozhoegtmi	84	2480
+709	lqkqlxxwnq	7	8118
+710	ltmxww	890	1113
+678	srggozvjmjsmck	134	3133
+604	mcjgxvbhptd	192	4048
+684	ppkbuafebshnz	928	7523
+578	vmytrshcqpixg	686	2754
+634	lrpfshmuvktls	75	2702
+695	eovfadr	344	892
+638	nxyjuvzgzhm	354	5262
+632	onkzrzsn	188	6960
+411	bhooh	397	9462
+661	eseihwa	396	3481
+603	ukvynkhgepedu	84	3836
+637	plsgtsksyhg	742	8868
+650	drybg	775	4039
+625	bpgkttlfeab	751	3759
+689	iogpkng	833	4533
+606	wyvozbvrozla	847	5365
+652	kpafgudxzrv	844	7643
+582	pwpebevu	956	6955
+573	xenogb	188	5435
+693	tvseio	593	990
+595	mmexfyh	18	7522
+608	aqmqkyzempilyq	383	4511
+681	onmquwabqxuzopa	33	3359
+609	kksayeavswtesuw	195	3575
+584	lineilcp	414	7264
+664	lshoxsulq	31	2072
+620	mrqeog	737	8786
+585	tyahedsvn	497	6238
+648	gpzozbsfuit	877	9583
+627	hellezfonddylf	423	6128
+647	alhob	464	547
+589	osryfcfbg	879	6451
+593	bmlmwnokvksvi	648	9165
+655	sllisenh	796	780
+619	wjyntskwuqnihxe	238	4922
+656	zmoebmxb	122	499
+640	mcwirksk	461	5889
+574	rxjnrljvk	968	8272
+669	tzcwjcpozzcfea	106	8250
+591	zbjblsvqtfluke	509	3698
+672	mtemcbqontb	809	219
+636	glyhmzvdglm	597	770
+618	xdjikfsrpvrhmxn	941	7565
+671	ayeuoy	939	9496
+686	pbbrcos	324	9585
+626	melzwldlbu	750	7400
+699	miyvtwfsvqovxob	266	8870
+572	xfizdvohhrddtji	109	6803
+570	cfwcavubsdd	227	3720
+679	lbasib	311	2105
+641	jlpyobkakakpfv	597	2870
+698	cozxrxxbjyrapg	717	5484
+691	ufolekb	378	3985
+598	ediytodywc	504	9778
+688	thypcmbidhbm	412	8889
+592	dlicg	512	4863
+612	qdszsshpzzxjf	820	9879
+711	zbjpm	198	8707
+680	iufzzteqha	621	8641
+716	swelhgfbsh	82	2491
+717	hhtnqkd	703	7380
+719	mxurjuwea	969	2754
+720	czkstxij	911	1780
+407	auaczttujtmer	744	4613
+724	jbpyely	71	4601
+725	ekaqjepmc	660	1138
+728	zjdytsjam	88	2557
+729	qmjizwkwwpmjcxz	817	9506
+730	cvwcyobqhs	631	9292
+731	jovntintogw	300	2090
+732	cpsouclsacwzpty	51	3727
+735	wmgam	334	4210
+736	ifybpiuogfcpwaq	370	9924
+738	ytbcluvlmu	201	7415
+849	bypxckxazwai	626	1175
+740	vrpycxmvgeirpva	6	625
+741	kpqhpnuobcf	526	7436
+743	vzgdbsnbui	27	3832
+744	adduxdwzjyd	870	2739
+745	bpqyyqwdnonr	187	1171
+746	qsuouiuyqsvhra	898	6000
+747	rhxqqn	602	2585
+750	dcdqnyiah	320	1767
+751	evchuhkydddxhkr	358	3345
+754	ezsmpts	935	5551
+755	almazejce	689	9966
+758	lrethjntdx	779	6451
+705	lvdlryyzuxtdzvl	233	7688
+762	kbdszgma	164	6175
+763	kxqhyyrnssjluw	998	9334
+764	fefjhiqrndejhhr	109	3737
+765	tjmalgugne	370	1519
+766	pwybublteoepbzt	556	1916
+768	qlzny	851	2888
+769	jzqjusgywqh	580	96
+771	dbslldcpvgn	340	8540
+772	zwehxeh	710	9008
+773	runrquuddgvsbk	30	8567
+775	sfjfbx	776	3722
+777	nuohyebvssuuoci	380	1429
+778	vaqbi	383	2462
+779	rtjmke	995	2069
+760	jkqqpk	913	4210
+782	kjjkj	933	480
+784	afelcu	974	973
+786	zjncvmiybq	85	3106
+787	xivslm	620	6744
+788	bhubzr	632	2682
+789	dnlrtwfkisw	349	3839
+836	yekeuipnfebmif	91	1233
+776	bfilu	407	3472
+742	uwzqrdqaouchwod	899	4054
+790	stmyfqmnqgekgi	713	877
+792	jtqymbbhdl	167	8281
+794	pmadxx	89	5645
+796	qrrrncggihnp	696	4377
+797	lvmflzxgpjqb	719	2131
+799	wkyoehmvr	734	7589
+802	yabyb	882	4270
+804	nxkty	45	9010
+805	hmzpgnlfvsg	690	6365
+798	ikrjraotwgygjfa	78	5784
+810	kdzlzsnicg	101	8606
+830	covzculptngq	368	7695
+811	vdxphzzsm	368	650
+812	fbqysdf	270	7144
+814	bwgdejqdtmvm	210	7775
+815	reakqafsaqqhcw	338	5674
+816	xhmsnrpgn	165	9052
+817	biukhibyspiy	753	3420
+818	lbakx	221	8757
+819	tjwaxweebyvftf	972	1069
+822	lfcxykowyupl	668	981
+823	moreaeg	32	2771
+800	ptmeaeejuayqxgc	21	8603
+826	sphevhnda	392	5911
+828	stpoxn	34	4955
+829	vroyjppnfuhjj	776	1347
+795	iukgumsyarndezj	802	7006
+721	hmsafb	43	4262
+831	rnfcnazwv	293	5271
+692	dkgarjiwiueawyc	431	659
+833	zeaxfubkmu	447	4531
+851	ddxfua	364	4403
+834	tzvoznlvomrjfvc	733	2202
+835	upudolizbdzozh	490	1571
+837	nnuibgcnepxhep	958	3275
+712	vjzajx	267	4929
+840	zitpahgyuw	397	8013
+841	tfyaaku	922	7296
+803	devqgz	895	5341
+842	wwinllgq	309	4647
+843	gubej	165	256
+844	uzyqgtlx	49	7547
+846	punpup	664	8834
+848	cgafdowiyo	796	8376
+756	gnjdqmkyzfari	572	8341
+718	nknihdlq	86	5886
+722	mvwot	803	8357
+734	krhrsrdo	551	6298
+727	cjasocvec	771	5904
+713	aaraniescgllt	951	5913
+801	bdjcznao	739	3612
+832	ylpckx	669	8522
+847	odgnkfkpehbslnh	251	68
+753	xxnktpncdtdjt	0	6249
+807	qavhwnfzccp	883	2781
+824	dcpwadi	9	2238
+26	gvsaigun	606	6906
+850	swdnhyraykngk	447	2313
+825	wktlpuruawqnmtt	272	8212
+748	ckhqnmtvpmvk	458	2905
+821	nksxbyjfacdfg	387	503
+145	iptumaiqoutz	802	775
+757	ajmywbrypog	225	5307
+838	ddqjbu	313	9216
+723	mqyzhwgxhjscw	445	4698
+759	auevqvyayd	892	3152
+767	llwxoszz	196	7043
+785	vyoellzaiu	161	4469
+733	yjcuf	856	9101
+806	bdknervby	383	7287
+808	dydcfmiocikbkzm	131	5351
+752	esbymmqexol	636	9821
+827	ghfazostoxgq	48	8635
+809	masoyhxtpq	59	5578
+737	gbmjgeim	908	4447
+781	admzihbhdzldoyb	403	9331
+780	tvprwbvkaqn	269	4477
+749	mclwilruxuoepfa	439	4594
+839	nwuotxzhcowfmd	9	958
+761	zxisksf	314	1499
+715	swssouiu	858	9445
+774	qrslhcjflnzdyyb	743	7322
+739	masoyiugysnj	484	3171
+770	dvhsxoqnqyxqizp	151	7930
+726	ttuqtusf	801	7759
+791	fgtzreouqprwlla	521	6831
+793	ssvapuc	677	5000
+820	nldhmjfngix	161	9709
+852	eqffekrxrct	308	7888
+853	djgmdsdbmzoh	752	5104
+845	urledf	43	3057
+858	rnryq	442	513
+860	auohccktwzabnh	284	8405
+862	wwjakfzyxonkcnd	695	7810
+863	wwykhcqifjqae	622	2289
+864	gihvcstuvnxmwqv	237	9603
+866	lffxkrddhdb	539	5082
+867	qyiajmjapbih	739	8309
+505	csgtackvsrddyet	704	467
+869	kkoleuwxjcashxc	633	9370
+813	cbmplyxsaoss	282	1661
+871	cbsrrbhqggplpzo	177	7690
+872	ljhypmgefz	713	418
+874	zxunavtaoguse	822	2043
+875	syylevs	961	9163
+876	ekfyhgfci	954	2766
+878	sqxrft	625	5667
+879	mcvkktajxeyqiu	848	7554
+881	zrayetdnqqawyzy	695	7442
+884	gewsin	907	3456
+885	rhewz	768	4114
+886	sbwegoqwbbtfg	772	237
+889	kzvctxdgnth	631	794
+890	zlyhu	822	5498
+891	jxhxdf	649	1552
+894	fksqbcggd	639	3342
+896	dhlybirrp	880	1128
+898	bduvox	297	7420
+899	owepkphtcbaulr	442	5522
+861	khgmleqboo	41	6555
+900	dxxdlvscntf	563	8239
+901	gkvcz	301	1423
+902	gidbuibyl	381	8745
+971	nkkddby	406	6962
+905	wluswuvlom	261	1195
+906	cfmyhnzyvco	960	4203
+907	ywkaroekhzz	518	818
+909	fukknxfxmxivghv	942	6974
+910	lqpfrlbsfxco	862	1415
+911	ttpepbvgbql	577	4478
+912	okncsur	484	2988
+913	rotalyrgjruj	603	4979
+914	cmngdy	479	2977
+916	gompktgvcetk	104	3824
+917	xoluycfynppjt	70	1290
+918	jcufydcn	840	605
+873	qcrgewayxwow	529	9665
+919	qrtzopsoznfo	869	3451
+920	jnyldqtjyib	536	125
+922	rcrhjnwjs	206	3512
+924	scvllpvwkih	629	7477
+925	iiivdloeimthh	591	8006
+893	vbxdasoynfpzirs	609	5038
+927	bajghrsj	747	5809
+928	dworrrhxhxaj	218	3675
+929	faplhazkrtt	683	5284
+930	pwtejlp	480	401
+865	uuraz	884	5123
+931	sbimpmzr	611	183
+932	tfedkjew	935	1970
+933	xrgsjq	897	457
+934	sjbouwyzx	255	1871
+935	wwqtyznw	510	9562
+936	vddifwx	395	3452
+937	ksejtnkjk	628	7827
+938	wwtqlbwjlya	376	4116
+939	emtrcakkebqxoev	657	3831
+855	ccoqeestsotmefe	498	4088
+940	prkiqnyyielmcjk	720	9648
+941	rsumdsgldi	200	9483
+944	lajzusi	871	7743
+945	ekoozmwkzb	96	3488
+947	lbpqrvhiihzwdx	987	1682
+923	vibteqipiyxjxcz	481	773
+948	mvalttganz	154	1382
+949	qakkpzpox	941	7533
+524	omyiepzwgsgtkm	651	7905
+950	ssumykiwhxkdgvv	966	5558
+952	wsdapoomohvbai	873	4741
+953	kxrzntnphshaqoh	702	1397
+954	rrobaeprkvcsben	748	837
+870	cspjy	535	4482
+956	dwtcrelvl	866	4032
+957	suoodpjet	620	3564
+958	sidbbdpxqu	257	8254
+959	vxykzjyzety	783	7231
+960	ieomdlgwwzydfz	687	5066
+961	ixeor	944	5513
+904	bqhgbognndk	584	3429
+962	micwzdzforzic	94	7349
+943	ptnzqdujwhv	766	5346
+964	muekcecehw	558	3137
+965	uvndibytzstrg	167	245
+966	wlxnk	433	7284
+967	xrqkdyhzirsjexr	338	4099
+969	ksyuf	412	4546
+970	cmbzbqucifq	644	9626
+973	fccnofkmvvixnbc	299	7436
+974	cewlzlxpxrxvqll	175	6738
+976	kndpkuusgt	527	7150
+978	bxfczzmg	797	7453
+979	jigifwzgcxxqbs	181	1462
+981	kwkzequkwrnh	957	3949
+982	isnygybiklor	99	4880
+983	loqlanunmr	812	87
+984	ntwzyuv	644	4510
+985	wfswavnzq	626	4227
+880	cgnxkzediqsdajk	217	6016
+986	zxfydrlyszrmtf	563	7061
+987	gbtmgdjr	944	4179
+988	kwkovuwu	387	4643
+989	pffrd	704	9025
+990	onohiupsjpc	415	7671
+991	yywvzotfvav	444	4270
+992	ptywolnedp	205	6488
+993	sodamxlmpejtnid	927	4123
+714	tjoorwlbvhxs	108	8629
+888	uhlyjkcvviqynp	695	6935
+854	yddrk	365	7180
+892	ladrslatn	33	7666
+977	wwmpkytvae	577	7127
+887	wpbrqacjqtsymqo	437	7364
+895	bnbktsei	323	3505
+955	ofkikwenskd	710	6433
+980	dxcyydpdad	100	4851
+926	xveuyzcrpcjar	895	8949
+915	wujuw	899	6963
+963	lziovbt	137	1180
+877	gupxls	220	7937
+975	unkghtgeqelvesf	30	1459
+897	xwwdeuzxuspfs	100	6283
+908	pbnedwnyyweog	962	5580
+857	rzchopbxhoe	494	4625
+946	qccoh	331	7000
+942	lxtktxfhnu	144	1030
+882	snbopa	675	1245
+868	qwlgbxbvudaj	933	3470
+859	dgaagxf	245	4627
+968	fboukrqcdjryj	56	1522
+951	pmdicua	491	3593
+972	vlojhs	806	9876
+994	gvlwltg	108	8891
+995	gkniwfcrj	157	7333
+856	iprqowonsyeuwm	847	4323
+997	ufcfzoaugfutlkd	600	5515
+998	rdeymysbdmsqle	184	7435
+999	vfjcper	623	4574
+1001	tkapbsvdoff	658	2331
+1003	rahzletuub	568	8839
+1004	upiahdlvawq	326	4842
+1005	vhhqdwoavtki	296	7404
+1007	dthruidupn	662	4194
+1008	xiyzzfucnxxkvgm	695	5538
+1009	hihva	706	9493
+1010	zxlhqfah	824	3862
+1012	schrvlyhwdtboa	966	9073
+1013	vvedrznxu	335	5828
+1014	lbefcguuairw	259	959
+1015	ezlkerfplwlou	533	7776
+1016	xodxxo	642	2756
+1017	mkxtzxvg	617	7340
+1018	ftufoglegt	554	7762
+1019	ccaihtn	179	1015
+1020	daxfarbzbori	293	5549
+1022	epcxtetfnsmc	715	8574
+1024	facyvtqedikhxq	826	9834
+1025	ncdwja	514	4340
+1026	rwjzqdi	187	8428
+1027	ttucjuaaegsq	221	657
+1028	ctphsauyr	103	4871
+1030	wrsdaasg	696	455
+1031	gkfvopfwgsf	97	5252
+1032	alzawrdvcpcvla	111	777
+1033	furdqwhmhuqaped	534	3074
+1034	mpkkmthy	986	9048
+1036	wygyakxpmkigrew	800	787
+1037	dqbswpl	795	6458
+1038	ieuppe	685	7291
+1039	cqrqropkx	787	4975
+1040	qpcuzntc	15	6334
+1042	rgtrvozfngluif	975	2784
+1043	afjialbkfxomxlk	175	9221
+1044	crqemejjrg	563	4934
+1045	nijcpq	815	624
+1046	bvemjfkzgewgh	231	5806
+1047	qtcuizxlrjntop	330	3291
+1048	zaainlqheh	588	1602
+1049	ckyoh	808	107
+1115	nkovc	134	449
+883	zfzykkhio	51	8644
+1050	ztneghqj	153	1585
+1051	lpktwwznzkr	393	3071
+1117	mfovp	102	7133
+1052	yibktvinbzqqfw	464	1855
+1053	grpepl	248	1441
+1054	tbtuafoefbuiq	34	7941
+1055	gszuk	744	1920
+1058	lvzstpi	109	4128
+1059	yxukyxumhqb	744	5935
+1061	qdanbsyss	396	2401
+1006	dzlgeohtzhfyj	397	5736
+1062	kqdcqpnn	123	422
+1063	txewonmnu	967	1567
+1064	vlcxxb	365	9072
+1065	oshuvxl	315	5679
+1066	bzjgqxsmzafpt	145	5981
+1067	qgjlynpqj	4	7675
+1068	mucuf	986	352
+1069	nbbqrwxbofewuf	154	7579
+1072	oucxsceyieg	171	1894
+1073	wvhscqwxkrogi	18	2441
+1075	zlwdbk	578	9142
+1076	xdnsoar	218	2296
+1077	xgtqifmdqjetjc	645	5129
+1078	ccboyogtdrpha	476	4132
+1079	ucdimogbdtqaf	440	1404
+1080	gvtoxwwqse	405	5794
+1081	kumvrqxdg	251	9957
+1082	ufmhkrqrrpdea	249	6186
+1083	dvwnquvf	10	7754
+1084	otnbvtakjc	413	2279
+1085	aqtsdisscof	646	799
+1086	vzqvymybpyfotui	132	7325
+1057	axtvbu	334	9536
+1070	riuifylmta	101	894
+590	gxgumkgjnumntv	102	2
+1089	ciaeswiyxbih	557	2751
+1090	uxdkoiuadds	221	7492
+1002	yatjnuf	332	5090
+1091	zaywgngqjyapdk	257	2412
+1092	gdptorqav	376	9025
+1074	zysvwnrkkgli	773	3488
+1093	avftyuaynox	693	1585
+1094	uihtepvtudmsog	814	6213
+1095	uanyoyiaecpl	289	8084
+1096	iwhjfw	446	1122
+1097	tqubjsygprmy	956	8157
+1099	ezrrxdfpcjvmw	345	6241
+1100	oimwlzzsv	381	4157
+1101	xnrtijsqbyqvkhs	336	5585
+1102	skzbyynz	269	1588
+1103	xkdwsoggjpovvbd	691	7227
+448	hzeeuiuylqjmd	144	8850
+1106	wtiywqflgpttop	986	6910
+1107	gbvqmstvoreiac	720	1139
+1108	qawlfug	717	701
+1109	kjipvtf	147	1772
+1087	xkoug	466	4488
+1110	llnyyupiclona	11	9526
+1105	vgwjdhv	875	669
+1112	zrvslmiltwmwwu	875	5898
+1113	zxbzbiwslchdepd	227	2464
+1114	hjhwbzxpkbyzoh	420	7035
+996	vazkknrtbzcgdsa	828	5404
+1116	ykifyrmxmqs	890	1052
+1118	vdvuxcasntzbgn	139	4089
+1119	wpeopujkvwpn	929	7058
+1120	drohmfdgu	924	3510
+1121	tsygenwnsfg	110	8743
+1122	pinto	616	4519
+1123	phisumvhl	469	2316
+1124	vtzcueorbmecqzg	587	5650
+1125	pthzogux	604	8057
+1071	ofedmvk	117	4226
+1126	koslkdcvdadfk	528	8726
+1128	xvjunsyxkvqsmrd	392	9734
+1129	lqyrrbbacowbp	990	4704
+1130	hswinw	571	8875
+1131	ybyuxygmeffwwwu	302	1949
+1132	rphjw	813	7692
+1104	chcnhpe	90	1109
+1134	gwgrutqb	317	3666
+1135	zhmtxqdupxu	658	7277
+1041	cbpqup	634	4201
+1000	yhhqjehfpxqk	386	2065
+1056	vjupgfnbulvztmu	994	6009
+1111	mxyvcoyg	551	4420
+1035	tizwtnajnry	799	2028
+1011	mrnkotmvfiacias	552	2157
+1088	olwsouzfmfm	653	4093
+1060	fulnuhvd	270	2308
+1127	rswolqc	786	2968
+1023	bmcoblnjyzo	682	6756
+1029	uygtdy	530	9110
+1133	opiplfbprzibcx	759	1536
+1098	imrqgmnd	339	47
+1136	hxrxkvwgwys	875	1704
+1021	xmrhwgscympzwb	741	5228
+1137	viakvlkqv	767	4969
+1138	uoadsb	162	8574
+1139	bgqqrdbbnkzgwxm	685	9581
+1140	sbxjqwqysyj	941	6281
+1141	gertnljzjvmky	167	9965
+1142	mtnpeglnjsjzw	107	4517
+1143	zmceobkfjjhpyv	308	4753
+1144	rxbncouorbjbx	482	1964
+1145	zkousreknp	757	1423
+1146	rjockitntprmhf	10	5401
+1147	ibxbumrgvnn	416	3358
+1148	usdjf	546	1993
+1149	jxckswj	451	6895
+1150	pdlnchcgc	290	837
+1151	noiiaf	700	1416
+1152	hrhxx	524	9337
+1153	aslhclsszlftac	67	2179
+1154	xojfohcqtuw	606	7313
+1155	wbsnekyewlizgd	228	8477
+401	hjeyguicetvau	64	7459
+1157	akomduvvpwzmrq	593	8792
+1158	tufbgxdxox	919	2883
+1159	fpbkke	841	3642
+1161	rcefot	241	8575
+1162	rxwwecrtffyx	711	7526
+1163	iptcs	879	754
+1164	wagwj	194	6549
+1165	zslpkofxszeg	710	6043
+1166	kpaloy	295	6962
+1167	tyfpwhy	349	7020
+1168	eptcxec	404	5210
+1169	cewppiiklodw	442	6441
+1170	zccra	586	3336
+783	pssyevjjis	390	3267
+1171	qimzawh	655	8405
+1173	hnjjg	542	2314
+1174	odyekusmsalx	660	7885
+1175	ehvkftqgig	744	3220
+1176	nptoorosxppezux	615	4432
+1177	vcnol	522	5904
+1178	qscpemxyacqy	55	1419
+1179	yhwypby	598	7927
+1180	caqauepdam	368	1924
+1181	dymnsxewrg	981	1904
+1182	jtprbcbbxmi	592	5531
+1183	ijidddzvqeggpf	895	3008
+1184	fbkzs	678	2244
+1185	utfobh	443	9903
+1186	lvpecntj	198	6872
+1187	rfaifxwrxyl	268	9594
+903	iiyqfrixxuxqwh	72	3082
+1188	dppicwxlus	732	1257
+1189	ifenlwgtk	375	9506
+1190	cuucdbykgymlchw	171	2920
+1191	vadfbyuttjfkmfs	521	3461
+1192	tmbprlkwsltn	522	405
+1193	ocvaapesq	175	3812
+1156	gtvvs	950	4095
+1194	paabnrxcl	808	9928
+1195	sumzjav	718	7959
+1196	cmpfosqryobv	687	3791
+1197	xeccbs	356	2982
+1198	ujhggzaqlrnpbga	685	7229
+1199	wkkvsoouytgx	62	5736
+1200	xiyruswztwok	518	9508
+1201	zdhjtzbhjc	917	9639
+1203	lyqjdqxhvxihs	255	429
+1204	zgywplau	388	8818
+1205	ugyylgoptwncm	508	5113
+1206	lbcahx	926	2883
+1207	idsikjkqbnds	343	2638
+1202	yvbzqdkd	884	64
+1208	llrnouzygjlvwn	994	2383
+1209	kjasla	497	4880
+1210	dafncnxq	496	1663
+1212	ymsvyuafmg	890	1822
+1213	oeqesbtgjy	437	5400
+1214	xkrxzhim	975	6521
+1215	soxoypljslo	435	546
+1216	qkggon	619	8833
+1217	ydrvgmjhof	640	3138
+1218	xysywhhtidrxja	804	7191
+1219	tyjwvk	372	2024
+1220	dylzuhjenpn	940	1056
+1221	wcpiuaunnqaujzi	894	312
+1222	binyqqfeclglfnf	817	5548
+1223	bgkvqipbnyhhv	197	7265
+1224	lbomga	260	4849
+1225	kjhbwjxmo	327	6999
+1226	ossilelrvxqou	2	2938
+1227	tryzwxgz	224	46
+1228	nhupmuwm	391	6202
+1229	rkeguhsyz	353	8382
+1230	pvrtagjrnayttz	882	1856
+1231	grnhdum	553	4474
+1232	puurpujosakusv	624	4784
+1172	ecwbqynzxioh	639	5232
+1233	cocnqack	415	2724
+1234	tktfjywaz	15	4751
+1235	dnnvaevgnxzb	933	4653
+1236	utojud	176	3324
+577	ylohtdxuwphr	861	382
+1237	koiaukv	134	2145
+1238	faqbypt	329	2972
+1239	wjwzgqco	94	2126
+1240	yhkwxwkv	640	8171
+1241	etnqckw	925	9497
+1242	pfcacdihlwlsd	1000	7915
+1243	slkadiihnoiowz	686	5372
+1244	wpomgl	967	8993
+1245	moldqqjfpg	747	5370
+1246	yorsnvexvix	647	7630
+1211	jpiioejrul	781	135
+1247	yqueipnyuave	94	7322
+1248	wjespvbrz	728	1384
+1250	zbplywfrc	138	8396
+1251	ifqanfgqqg	336	9721
+1252	hrvuzuruhpfg	146	2684
+1253	mdtbgmn	968	3330
+1254	ybpzqfsxnuc	823	1123
+1255	sksimzluo	69	9442
+1256	jbmmyjuci	486	7864
+1249	mhbuplszzknhprh	413	8044
+1257	hybgscq	117	2148
+1258	qyamvegkxvwmovn	161	9484
+1160	xickjigvf	347	5673
+1259	upolqxmjyanwwhb	247	5663
+1260	ihuyxs	895	7259
+1261	amrizxkzchs	888	1215
+1262	gnoebto	245	484
+1263	pqztwlzu	833	7779
+2527	q	604	687
+921	qvxktnf	763	428
+3792	jvjxxfwcfonbabmdgd	689	659
+441	jfxflpvb	128	7588
+5058	ljfh	648	598
+339	qgxwzko	700	953
+\.
+
+
+--
+-- Name: product_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
+--
+
+SELECT pg_catalog.setval('public.product_id_seq', 5058, true);
+
+
+--
+-- Data for Name: purchase; Type: TABLE DATA; Schema: public; Owner: testuser
+--
+
+COPY public.purchase (id, date_time, customer_id, product_id) FROM stdin;
+1	1990-01-04 07:00:00	13	11
+2	1990-01-04 09:00:00	20	20
+3	1990-01-04 12:00:00	12	20
+4	1990-01-04 22:00:00	22	17
+5	1990-01-05 18:00:00	28	1
+6	1990-01-06 07:00:00	17	1
+7	1990-01-07 01:00:00	2	3
+8	1990-01-07 04:00:00	16	24
+9	1990-01-07 14:00:00	25	16
+10	1990-01-07 20:00:00	13	21
+11	1990-01-07 23:00:00	16	16
+12	1990-01-08 03:00:00	29	23
+13	1990-01-08 05:00:00	22	5
+14	1990-01-08 10:00:00	2	16
+15	1990-01-08 18:00:00	30	21
+16	1990-01-09 11:00:00	36	1
+17	1990-01-09 17:00:00	13	31
+18	1990-01-09 20:00:00	41	3
+19	1990-01-10 04:00:00	6	29
+20	1990-01-10 12:00:00	4	24
+21	1990-01-10 17:00:00	45	24
+22	1990-01-11 05:00:00	24	16
+23	1990-01-11 10:00:00	42	7
+24	1990-01-11 17:00:00	15	24
+25	1990-01-11 20:00:00	15	34
+26	1990-01-12 02:00:00	10	16
+27	1990-01-12 03:00:00	49	20
+28	1990-01-12 14:00:00	24	37
+29	1990-01-13 05:00:00	1	39
+30	1990-01-13 11:00:00	16	30
+31	1990-01-13 13:00:00	10	40
+32	1990-01-14 03:00:00	12	33
+33	1990-01-14 09:00:00	27	50
+34	1990-01-14 11:00:00	43	32
+35	1990-01-14 12:00:00	49	40
+36	1990-01-14 14:00:00	44	31
+37	1990-01-14 18:00:00	26	26
+38	1990-01-14 21:00:00	24	24
+39	1990-01-15 15:00:00	24	39
+40	1990-01-15 16:00:00	55	47
+41	1990-01-15 17:00:00	16	49
+42	1990-01-15 19:00:00	4	32
+43	1990-01-15 23:00:00	53	2
+44	1990-01-16 16:00:00	49	27
+45	1990-01-17 01:00:00	14	35
+46	1990-01-17 06:00:00	22	53
+47	1990-01-17 16:00:00	36	30
+48	1990-01-17 21:00:00	15	4
+49	1990-01-18 00:00:00	27	51
+50	1990-01-18 22:00:00	8	35
+51	1990-01-20 22:00:00	1	35
+52	1990-01-21 02:00:00	20	7
+53	1990-01-21 04:00:00	24	49
+54	1990-01-21 05:00:00	8	68
+55	1990-01-21 10:00:00	66	9
+56	1990-01-21 16:00:00	3	59
+57	1990-01-21 17:00:00	11	43
+58	1990-01-22 03:00:00	53	8
+59	1990-01-22 05:00:00	38	43
+60	1990-01-22 09:00:00	65	22
+61	1990-01-23 22:00:00	36	71
+62	1990-01-24 16:00:00	3	58
+63	1990-01-24 18:00:00	19	51
+64	1990-01-24 19:00:00	47	70
+65	1990-01-25 02:00:00	21	20
+66	1990-01-26 04:00:00	38	18
+67	1990-01-27 01:00:00	8	51
+68	1990-01-27 10:00:00	20	44
+69	1990-01-27 12:00:00	73	27
+70	1990-01-27 15:00:00	49	75
+71	1990-01-28 03:00:00	4	22
+72	1990-01-28 07:00:00	32	84
+73	1990-01-28 16:00:00	66	88
+74	1990-01-28 22:00:00	92	46
+75	1990-02-01 01:00:00	12	36
+76	1990-02-01 02:00:00	70	10
+77	1990-02-01 20:00:00	53	85
+78	1990-02-02 01:00:00	45	85
+79	1990-02-02 10:00:00	49	66
+80	1990-02-02 16:00:00	79	26
+81	1990-02-02 20:00:00	51	85
+82	1990-02-02 22:00:00	14	30
+83	1990-02-04 06:00:00	55	73
+84	1990-02-04 21:00:00	50	16
+85	1990-02-04 23:00:00	29	20
+86	1990-02-05 12:00:00	107	82
+87	1990-02-05 21:00:00	82	81
+88	1990-02-06 11:00:00	61	58
+89	1990-02-06 12:00:00	97	50
+90	1990-02-06 20:00:00	112	44
+91	1990-02-07 05:00:00	100	100
+93	1990-02-08 00:00:00	21	75
+94	1990-02-09 05:00:00	60	32
+95	1990-02-10 00:00:00	11	82
+96	1990-02-10 06:00:00	23	56
+97	1990-02-11 08:00:00	102	17
+98	1990-02-12 15:00:00	116	69
+99	1990-02-12 22:00:00	6	6
+100	1990-02-13 10:00:00	118	91
+101	1990-02-13 11:00:00	137	98
+102	1990-02-13 14:00:00	70	112
+103	1990-02-13 19:00:00	79	117
+104	1990-02-14 02:00:00	10	130
+105	1990-02-15 23:00:00	67	103
+106	1990-02-16 04:00:00	118	61
+107	1990-02-17 00:00:00	6	140
+108	1990-02-17 01:00:00	38	22
+109	1990-02-17 03:00:00	55	49
+110	1990-02-17 08:00:00	142	15
+111	1990-02-17 13:00:00	98	15
+112	1990-02-17 21:00:00	93	15
+113	1990-02-18 08:00:00	111	11
+114	1990-02-18 11:00:00	73	28
+115	1990-02-19 21:00:00	145	92
+116	1990-02-19 22:00:00	69	50
+117	1990-02-20 07:00:00	156	18
+118	1990-02-20 15:00:00	47	48
+119	1990-02-20 21:00:00	48	98
+120	1990-02-21 16:00:00	7	131
+121	1990-02-21 18:00:00	117	84
+122	1990-02-22 04:00:00	126	83
+123	1990-02-22 07:00:00	156	69
+124	1990-02-23 00:00:00	31	117
+125	1990-02-23 01:00:00	47	143
+126	1990-02-23 18:00:00	65	118
+127	1990-02-23 20:00:00	73	109
+128	1990-02-23 21:00:00	98	89
+129	1990-02-24 00:00:00	25	89
+130	1990-02-24 09:00:00	21	107
+131	1990-02-24 13:00:00	1	67
+132	1990-02-24 20:00:00	57	68
+133	1990-02-25 04:00:00	132	158
+134	1990-02-25 12:00:00	114	101
+135	1990-02-25 14:00:00	5	94
+136	1990-02-25 16:00:00	50	25
+137	1990-02-26 22:00:00	32	165
+138	1990-02-27 09:00:00	40	35
+139	1990-02-28 20:00:00	85	127
+140	1990-02-28 22:00:00	179	155
+141	1990-03-01 16:00:00	95	125
+142	1990-03-02 04:00:00	137	29
+143	1990-03-02 19:00:00	2	163
+144	1990-03-03 08:00:00	5	57
+145	1990-03-03 17:00:00	98	72
+146	1990-03-03 21:00:00	79	12
+147	1990-03-04 12:00:00	176	98
+148	1990-03-04 16:00:00	57	41
+149	1990-03-04 21:00:00	35	14
+150	1990-03-04 23:00:00	152	128
+151	1990-03-05 03:00:00	167	37
+152	1990-03-05 08:00:00	108	57
+153	1990-03-05 22:00:00	198	98
+154	1990-03-06 03:00:00	143	87
+155	1990-03-06 18:00:00	192	27
+156	1990-03-07 03:00:00	16	157
+157	1990-03-07 04:00:00	49	196
+158	1990-03-07 05:00:00	171	83
+159	1990-03-07 06:00:00	73	148
+160	1990-03-07 21:00:00	141	115
+161	1990-03-09 11:00:00	201	55
+162	1990-03-09 15:00:00	74	167
+163	1990-03-10 06:00:00	115	164
+164	1990-03-10 16:00:00	146	5
+165	1990-03-11 09:00:00	30	13
+166	1990-03-11 11:00:00	129	23
+167	1990-03-11 21:00:00	219	44
+168	1990-03-12 05:00:00	115	74
+169	1990-03-12 12:00:00	12	17
+170	1990-03-12 16:00:00	75	108
+171	1990-03-12 21:00:00	72	204
+172	1990-03-13 05:00:00	49	85
+173	1990-03-13 08:00:00	89	179
+174	1990-03-13 18:00:00	80	142
+175	1990-03-13 19:00:00	144	130
+176	1990-03-13 21:00:00	69	12
+177	1990-03-14 04:00:00	122	57
+178	1990-03-14 22:00:00	204	129
+179	1990-03-15 00:00:00	104	123
+180	1990-03-15 10:00:00	71	182
+181	1990-03-15 13:00:00	16	40
+182	1990-03-15 20:00:00	216	18
+183	1990-03-15 21:00:00	73	4
+184	1990-03-15 23:00:00	58	215
+185	1990-03-16 02:00:00	124	94
+186	1990-03-16 06:00:00	76	121
+187	1990-03-16 12:00:00	38	147
+188	1990-03-17 06:00:00	162	192
+189	1990-03-17 09:00:00	227	44
+190	1990-03-17 12:00:00	99	168
+191	1990-03-17 13:00:00	200	39
+192	1990-03-17 21:00:00	232	158
+193	1990-03-18 01:00:00	208	181
+194	1990-03-18 04:00:00	58	137
+195	1990-03-18 12:00:00	178	215
+196	1990-03-19 03:00:00	124	40
+197	1990-03-19 21:00:00	112	223
+198	1990-03-19 22:00:00	187	82
+199	1990-03-20 10:00:00	117	68
+200	1990-03-20 20:00:00	187	76
+201	1990-03-20 23:00:00	132	201
+202	1990-03-21 05:00:00	145	129
+203	1990-03-21 20:00:00	113	178
+204	1990-03-22 00:00:00	180	85
+205	1990-03-22 01:00:00	107	136
+206	1990-03-23 00:00:00	67	66
+207	1990-03-23 03:00:00	96	184
+208	1990-03-23 19:00:00	229	31
+209	1990-03-24 01:00:00	177	241
+210	1990-03-24 13:00:00	186	30
+211	1990-03-24 23:00:00	170	4
+212	1990-03-25 02:00:00	200	14
+213	1990-03-25 08:00:00	39	189
+214	1990-03-25 12:00:00	34	55
+215	1990-03-26 00:00:00	238	35
+216	1990-03-26 02:00:00	131	6
+217	1990-03-26 06:00:00	65	112
+218	1990-03-26 09:00:00	17	27
+219	1990-03-26 17:00:00	50	105
+220	1990-03-28 05:00:00	91	265
+221	1990-03-28 08:00:00	39	205
+222	1990-03-28 11:00:00	29	251
+223	1990-03-28 17:00:00	125	39
+224	1990-03-28 18:00:00	74	27
+225	1990-04-01 02:00:00	204	193
+226	1990-04-01 03:00:00	128	245
+227	1990-04-01 09:00:00	204	13
+228	1990-04-02 05:00:00	267	120
+229	1990-04-02 07:00:00	165	236
+230	1990-04-02 22:00:00	58	24
+231	1990-04-03 11:00:00	5	150
+232	1990-04-03 18:00:00	266	131
+233	1990-04-04 11:00:00	137	167
+234	1990-04-04 14:00:00	120	3
+235	1990-04-04 15:00:00	107	60
+236	1990-04-04 22:00:00	29	81
+237	1990-04-05 02:00:00	275	269
+238	1990-04-05 09:00:00	219	20
+239	1990-04-05 16:00:00	63	187
+240	1990-04-06 09:00:00	172	25
+241	1990-04-06 17:00:00	26	66
+242	1990-04-06 20:00:00	209	252
+243	1990-04-07 11:00:00	203	207
+244	1990-04-07 13:00:00	87	48
+245	1990-04-08 12:00:00	105	7
+246	1990-04-09 04:00:00	288	218
+247	1990-04-09 06:00:00	222	52
+248	1990-04-09 10:00:00	276	277
+249	1990-04-09 18:00:00	120	100
+250	1990-04-09 21:00:00	177	279
+251	1990-04-10 04:00:00	70	86
+252	1990-04-11 10:00:00	15	160
+253	1990-04-11 14:00:00	200	16
+254	1990-04-12 13:00:00	218	73
+255	1990-04-13 13:00:00	14	106
+256	1990-04-14 01:00:00	163	175
+257	1990-04-14 07:00:00	294	27
+258	1990-04-14 15:00:00	223	233
+259	1990-04-15 08:00:00	104	219
+260	1990-04-15 14:00:00	2	196
+261	1990-04-16 08:00:00	53	127
+262	1990-04-16 14:00:00	18	100
+263	1990-04-16 18:00:00	53	261
+264	1990-04-17 05:00:00	311	181
+265	1990-04-17 12:00:00	205	134
+266	1990-04-17 13:00:00	35	279
+267	1990-04-18 00:00:00	159	289
+268	1990-04-18 06:00:00	12	166
+269	1990-04-18 09:00:00	33	41
+270	1990-04-18 11:00:00	31	318
+271	1990-04-18 16:00:00	179	46
+272	1990-04-18 21:00:00	259	60
+273	1990-04-19 02:00:00	104	94
+274	1990-04-19 06:00:00	171	308
+275	1990-04-19 08:00:00	192	211
+276	1990-04-19 16:00:00	14	156
+277	1990-04-19 20:00:00	76	326
+278	1990-04-20 05:00:00	209	107
+279	1990-04-20 12:00:00	45	198
+280	1990-04-20 20:00:00	250	217
+281	1990-04-21 07:00:00	3	309
+282	1990-04-21 10:00:00	226	282
+283	1990-04-21 22:00:00	307	24
+284	1990-04-22 11:00:00	283	293
+285	1990-04-22 13:00:00	213	113
+286	1990-04-23 15:00:00	326	124
+287	1990-04-23 23:00:00	141	7
+288	1990-04-24 00:00:00	239	10
+289	1990-04-24 02:00:00	261	79
+290	1990-04-24 06:00:00	165	70
+291	1990-04-24 10:00:00	272	24
+292	1990-04-24 16:00:00	7	338
+293	1990-04-24 20:00:00	128	198
+294	1990-04-24 22:00:00	312	134
+296	1990-04-25 05:00:00	45	275
+297	1990-04-26 04:00:00	170	54
+298	1990-04-26 18:00:00	229	265
+299	1990-04-27 10:00:00	240	193
+300	1990-04-27 13:00:00	85	188
+301	1990-04-28 05:00:00	257	222
+302	1990-04-28 07:00:00	177	68
+303	1990-04-29 00:00:00	150	91
+304	1990-05-01 06:00:00	182	263
+305	1990-05-01 14:00:00	79	328
+306	1990-05-02 22:00:00	231	86
+307	1990-05-03 08:00:00	111	324
+308	1990-05-03 11:00:00	92	105
+309	1990-05-03 17:00:00	81	83
+310	1990-05-04 04:00:00	165	90
+311	1990-05-04 17:00:00	169	303
+312	1990-05-04 18:00:00	109	43
+313	1990-05-04 19:00:00	181	222
+314	1990-05-05 20:00:00	20	113
+315	1990-05-06 01:00:00	173	142
+316	1990-05-06 12:00:00	243	37
+317	1990-05-06 21:00:00	364	140
+318	1990-05-07 19:00:00	145	319
+319	1990-05-07 22:00:00	61	351
+320	1990-05-08 08:00:00	291	177
+321	1990-05-08 14:00:00	286	53
+322	1990-05-08 22:00:00	355	56
+323	1990-05-09 00:00:00	143	147
+324	1990-05-09 03:00:00	263	238
+325	1990-05-09 09:00:00	289	57
+326	1990-05-09 19:00:00	106	11
+327	1990-05-10 04:00:00	315	102
+328	1990-05-10 08:00:00	156	112
+329	1990-05-10 20:00:00	379	132
+330	1990-05-11 14:00:00	344	283
+331	1990-05-11 19:00:00	116	272
+332	1990-05-11 20:00:00	62	375
+333	1990-05-11 22:00:00	31	129
+334	1990-05-11 23:00:00	86	201
+335	1990-05-12 01:00:00	7	169
+336	1990-05-12 03:00:00	13	17
+337	1990-05-13 00:00:00	185	271
+338	1990-05-13 14:00:00	89	35
+339	1990-05-13 19:00:00	373	257
+340	1990-05-14 19:00:00	354	173
+341	1990-05-15 13:00:00	309	45
+342	1990-05-15 15:00:00	253	95
+343	1990-05-15 17:00:00	140	129
+344	1990-05-15 20:00:00	333	112
+345	1990-05-16 20:00:00	180	54
+346	1990-05-17 06:00:00	351	227
+347	1990-05-18 01:00:00	208	84
+348	1990-05-18 12:00:00	247	116
+349	1990-05-18 23:00:00	163	137
+350	1990-05-19 19:00:00	76	28
+351	1990-05-20 02:00:00	275	394
+352	1990-05-20 06:00:00	392	343
+353	1990-05-20 09:00:00	180	337
+354	1990-05-20 16:00:00	183	150
+355	1990-05-20 22:00:00	94	219
+356	1990-05-21 10:00:00	247	135
+357	1990-05-21 18:00:00	209	170
+358	1990-05-22 05:00:00	184	225
+359	1990-05-23 05:00:00	176	397
+360	1990-05-23 16:00:00	47	320
+361	1990-05-23 23:00:00	278	361
+362	1990-05-24 00:00:00	254	259
+363	1990-05-24 14:00:00	130	388
+364	1990-05-24 23:00:00	287	127
+365	1990-05-25 06:00:00	271	203
+366	1990-05-25 10:00:00	2	132
+367	1990-05-25 19:00:00	76	225
+368	1990-05-26 06:00:00	40	79
+369	1990-05-26 10:00:00	368	36
+370	1990-05-26 15:00:00	364	273
+371	1990-05-27 06:00:00	275	291
+372	1990-05-27 21:00:00	295	61
+373	1990-05-28 18:00:00	267	213
+374	1990-05-28 22:00:00	151	378
+375	1990-06-01 13:00:00	85	308
+376	1990-06-01 20:00:00	18	367
+377	1990-06-02 01:00:00	422	88
+378	1990-06-02 21:00:00	138	58
+379	1990-06-03 14:00:00	13	317
+380	1990-06-03 21:00:00	290	361
+381	1990-06-05 00:00:00	214	224
+382	1990-06-05 19:00:00	142	136
+383	1990-06-06 00:00:00	381	3
+384	1990-06-06 07:00:00	432	105
+385	1990-06-06 09:00:00	148	450
+386	1990-06-06 18:00:00	386	31
+387	1990-06-06 22:00:00	354	225
+388	1990-06-07 20:00:00	109	257
+389	1990-06-07 21:00:00	34	182
+390	1990-06-08 02:00:00	131	268
+391	1990-06-08 06:00:00	41	73
+392	1990-06-08 11:00:00	414	434
+393	1990-06-08 23:00:00	116	6
+394	1990-06-09 05:00:00	330	2
+395	1990-06-09 12:00:00	314	351
+396	1990-06-09 14:00:00	293	373
+397	1990-06-09 18:00:00	184	188
+398	1990-06-10 03:00:00	292	191
+399	1990-06-10 13:00:00	157	172
+400	1990-06-11 01:00:00	33	5
+401	1990-06-12 08:00:00	151	198
+402	1990-06-12 20:00:00	188	318
+403	1990-06-13 07:00:00	251	182
+404	1990-06-13 21:00:00	404	389
+405	1990-06-14 03:00:00	329	156
+406	1990-06-14 07:00:00	312	169
+407	1990-06-14 18:00:00	475	50
+408	1990-06-15 13:00:00	308	442
+409	1990-06-15 16:00:00	180	339
+410	1990-06-16 08:00:00	474	158
+411	1990-06-16 15:00:00	126	327
+412	1990-06-16 17:00:00	60	169
+413	1990-06-17 04:00:00	303	135
+414	1990-06-17 17:00:00	269	112
+415	1990-06-17 19:00:00	354	400
+416	1990-06-18 10:00:00	46	398
+417	1990-06-18 13:00:00	86	104
+418	1990-06-18 20:00:00	107	91
+419	1990-06-19 04:00:00	293	419
+420	1990-06-19 08:00:00	222	103
+421	1990-06-19 22:00:00	156	190
+422	1990-06-20 01:00:00	301	233
+423	1990-06-20 03:00:00	57	363
+424	1990-06-20 07:00:00	94	221
+425	1990-06-20 08:00:00	35	12
+426	1990-06-20 14:00:00	201	458
+427	1990-06-21 11:00:00	444	418
+428	1990-06-22 19:00:00	27	457
+429	1990-06-23 03:00:00	178	113
+430	1990-06-23 05:00:00	300	13
+431	1990-06-23 06:00:00	419	24
+432	1990-06-23 13:00:00	365	29
+433	1990-06-23 14:00:00	390	394
+434	1990-06-23 15:00:00	98	209
+435	1990-06-23 20:00:00	460	309
+436	1990-06-23 21:00:00	95	201
+437	1990-06-24 03:00:00	138	392
+438	1990-06-24 08:00:00	30	133
+439	1990-06-25 01:00:00	288	110
+440	1990-06-25 04:00:00	410	328
+441	1990-06-25 21:00:00	227	363
+442	1990-06-26 04:00:00	244	287
+443	1990-06-26 05:00:00	15	97
+444	1990-06-26 16:00:00	203	144
+445	1990-06-26 21:00:00	372	2
+446	1990-06-27 08:00:00	396	501
+447	1990-06-27 09:00:00	52	418
+448	1990-06-27 12:00:00	468	473
+449	1990-06-27 18:00:00	140	180
+450	1990-06-28 00:00:00	37	284
+451	1990-06-28 12:00:00	193	95
+452	1990-06-28 19:00:00	222	77
+453	1990-06-28 22:00:00	166	469
+454	1990-07-01 07:00:00	106	470
+455	1990-07-01 15:00:00	493	374
+456	1990-07-01 23:00:00	359	151
+457	1990-07-02 15:00:00	7	293
+458	1990-07-02 23:00:00	368	148
+459	1990-07-04 05:00:00	421	177
+460	1990-07-04 11:00:00	283	53
+461	1990-07-04 18:00:00	2	122
+462	1990-07-04 20:00:00	186	125
+463	1990-07-05 02:00:00	62	175
+464	1990-07-05 07:00:00	450	24
+465	1990-07-05 11:00:00	509	517
+466	1990-07-05 12:00:00	227	483
+467	1990-07-05 19:00:00	442	161
+468	1990-07-06 00:00:00	129	39
+469	1990-07-06 08:00:00	323	444
+470	1990-07-06 16:00:00	75	272
+471	1990-07-06 22:00:00	256	205
+472	1990-07-07 04:00:00	55	476
+473	1990-07-07 07:00:00	294	462
+474	1990-07-07 12:00:00	233	362
+475	1990-07-08 00:00:00	511	532
+476	1990-07-08 01:00:00	121	115
+477	1990-07-08 05:00:00	389	250
+478	1990-07-08 10:00:00	44	121
+479	1990-07-08 12:00:00	351	156
+480	1990-07-08 18:00:00	384	86
+481	1990-07-08 21:00:00	142	436
+482	1990-07-09 08:00:00	55	448
+483	1990-07-09 23:00:00	489	413
+484	1990-07-10 06:00:00	148	477
+485	1990-07-10 15:00:00	5	503
+486	1990-07-10 20:00:00	527	349
+487	1990-07-12 20:00:00	325	129
+488	1990-07-13 01:00:00	288	67
+489	1990-07-13 07:00:00	270	197
+490	1990-07-13 14:00:00	29	162
+491	1990-07-13 15:00:00	309	39
+492	1990-07-15 14:00:00	400	501
+493	1990-07-15 16:00:00	31	285
+494	1990-07-15 22:00:00	443	201
+495	1990-07-16 18:00:00	352	128
+496	1990-07-17 04:00:00	301	459
+497	1990-07-17 20:00:00	421	212
+498	1990-07-18 14:00:00	319	163
+499	1990-07-18 17:00:00	561	18
+500	1990-07-18 20:00:00	292	516
+501	1990-07-19 01:00:00	542	228
+502	1990-07-19 04:00:00	68	310
+503	1990-07-19 08:00:00	207	529
+504	1990-07-19 09:00:00	175	334
+505	1990-07-19 11:00:00	117	417
+506	1990-07-20 02:00:00	110	49
+507	1990-07-20 14:00:00	100	470
+508	1990-07-20 19:00:00	214	541
+509	1990-07-20 20:00:00	533	218
+510	1990-07-21 04:00:00	305	393
+511	1990-07-21 11:00:00	428	426
+512	1990-07-21 13:00:00	54	247
+513	1990-07-21 19:00:00	538	348
+514	1990-07-22 08:00:00	358	273
+515	1990-07-23 14:00:00	133	275
+516	1990-07-23 16:00:00	342	217
+517	1990-07-24 15:00:00	479	158
+518	1990-07-24 21:00:00	17	188
+519	1990-07-25 00:00:00	183	5
+520	1990-07-25 04:00:00	248	560
+521	1990-07-25 07:00:00	75	105
+522	1990-07-25 15:00:00	347	88
+523	1990-07-26 01:00:00	33	431
+524	1990-07-26 10:00:00	271	354
+525	1990-07-26 15:00:00	184	440
+526	1990-07-26 17:00:00	560	61
+527	1990-07-27 07:00:00	334	226
+528	1990-07-27 20:00:00	25	270
+529	1990-07-27 23:00:00	350	591
+530	1990-07-28 12:00:00	140	585
+531	1990-07-28 16:00:00	43	185
+532	1990-07-28 18:00:00	145	388
+533	1990-07-28 23:00:00	212	539
+534	1990-08-01 04:00:00	21	218
+535	1990-08-01 05:00:00	320	527
+536	1990-08-01 07:00:00	464	260
+537	1990-08-01 20:00:00	425	161
+538	1990-08-02 01:00:00	145	451
+539	1990-08-02 10:00:00	320	121
+540	1990-08-03 08:00:00	149	522
+541	1990-08-03 12:00:00	146	20
+542	1990-08-03 19:00:00	105	476
+543	1990-08-04 01:00:00	406	553
+544	1990-08-04 14:00:00	131	144
+546	1990-08-05 06:00:00	135	137
+547	1990-08-05 13:00:00	192	546
+548	1990-08-05 17:00:00	41	98
+549	1990-08-05 20:00:00	317	35
+550	1990-08-06 03:00:00	251	386
+551	1990-08-06 16:00:00	166	101
+552	1990-08-06 23:00:00	474	296
+553	1990-08-07 06:00:00	532	31
+554	1990-08-07 20:00:00	589	362
+555	1990-08-07 22:00:00	88	22
+556	1990-08-07 23:00:00	77	254
+557	1990-08-08 05:00:00	193	495
+558	1990-08-08 12:00:00	611	140
+559	1990-08-08 18:00:00	416	377
+560	1990-08-09 08:00:00	176	86
+561	1990-08-09 09:00:00	347	463
+562	1990-08-09 14:00:00	307	94
+563	1990-08-09 19:00:00	427	6
+564	1990-08-10 02:00:00	544	614
+565	1990-08-10 03:00:00	576	418
+566	1990-08-10 15:00:00	13	538
+567	1990-08-10 23:00:00	60	447
+568	1990-08-11 04:00:00	447	147
+569	1990-08-11 14:00:00	198	406
+570	1990-08-12 22:00:00	43	151
+571	1990-08-13 09:00:00	10	143
+572	1990-08-13 16:00:00	16	266
+573	1990-08-14 04:00:00	355	542
+574	1990-08-14 06:00:00	401	592
+575	1990-08-14 09:00:00	281	567
+576	1990-08-14 18:00:00	23	466
+577	1990-08-15 13:00:00	324	184
+578	1990-08-16 00:00:00	605	277
+579	1990-08-16 11:00:00	455	26
+580	1990-08-16 13:00:00	261	294
+581	1990-08-16 19:00:00	172	128
+582	1990-08-17 11:00:00	68	462
+583	1990-08-17 15:00:00	166	57
+584	1990-08-17 17:00:00	110	209
+585	1990-08-18 00:00:00	232	8
+586	1990-08-18 08:00:00	559	450
+587	1990-08-18 09:00:00	219	477
+588	1990-08-18 17:00:00	21	217
+589	1990-08-19 04:00:00	26	256
+590	1990-08-19 09:00:00	565	67
+591	1990-08-19 23:00:00	67	129
+592	1990-08-20 02:00:00	303	488
+593	1990-08-20 04:00:00	296	97
+594	1990-08-20 14:00:00	188	480
+595	1990-08-21 04:00:00	258	216
+596	1990-08-21 17:00:00	634	437
+597	1990-08-21 21:00:00	253	415
+598	1990-08-22 07:00:00	164	504
+599	1990-08-22 13:00:00	449	461
+600	1990-08-23 06:00:00	270	369
+601	1990-08-23 08:00:00	291	351
+602	1990-08-23 10:00:00	299	542
+603	1990-08-23 11:00:00	179	351
+604	1990-08-24 00:00:00	330	566
+605	1990-08-24 14:00:00	501	446
+606	1990-08-25 10:00:00	262	589
+607	1990-08-25 19:00:00	461	536
+608	1990-08-26 06:00:00	422	275
+609	1990-08-26 10:00:00	597	603
+610	1990-08-26 11:00:00	548	568
+611	1990-08-26 20:00:00	460	64
+612	1990-08-26 23:00:00	548	123
+613	1990-08-28 06:00:00	442	547
+614	1990-08-28 14:00:00	208	287
+615	1990-09-01 08:00:00	676	349
+616	1990-09-01 21:00:00	409	687
+617	1990-09-02 01:00:00	22	427
+618	1990-09-02 02:00:00	562	182
+619	1990-09-02 06:00:00	460	28
+620	1990-09-02 23:00:00	249	513
+621	1990-09-03 01:00:00	440	596
+622	1990-09-03 09:00:00	222	456
+623	1990-09-03 15:00:00	340	190
+624	1990-09-04 00:00:00	57	333
+625	1990-09-05 00:00:00	358	166
+626	1990-09-05 01:00:00	3	554
+627	1990-09-05 06:00:00	467	630
+628	1990-09-05 13:00:00	70	518
+629	1990-09-05 18:00:00	450	688
+630	1990-09-06 07:00:00	290	174
+631	1990-09-07 02:00:00	657	487
+632	1990-09-07 07:00:00	641	373
+633	1990-09-07 14:00:00	605	465
+634	1990-09-08 09:00:00	585	631
+635	1990-09-08 15:00:00	21	574
+636	1990-09-09 04:00:00	588	86
+637	1990-09-09 07:00:00	248	2
+638	1990-09-09 13:00:00	539	518
+639	1990-09-10 03:00:00	82	148
+640	1990-09-10 11:00:00	502	484
+641	1990-09-10 18:00:00	614	155
+642	1990-09-11 05:00:00	242	111
+643	1990-09-11 11:00:00	330	110
+644	1990-09-12 05:00:00	348	218
+645	1990-09-12 21:00:00	18	345
+646	1990-09-12 23:00:00	484	592
+647	1990-09-13 01:00:00	607	33
+648	1990-09-13 09:00:00	125	383
+649	1990-09-13 20:00:00	474	18
+650	1990-09-14 04:00:00	366	148
+651	1990-09-14 09:00:00	25	715
+652	1990-09-14 19:00:00	533	213
+653	1990-09-14 20:00:00	326	492
+654	1990-09-15 00:00:00	482	118
+655	1990-09-15 01:00:00	153	295
+656	1990-09-16 00:00:00	706	454
+657	1990-09-16 04:00:00	392	1
+658	1990-09-16 06:00:00	673	221
+659	1990-09-16 21:00:00	435	340
+660	1990-09-17 03:00:00	66	454
+661	1990-09-17 08:00:00	480	642
+662	1990-09-17 10:00:00	327	371
+663	1990-09-17 20:00:00	28	140
+664	1990-09-18 04:00:00	221	595
+665	1990-09-18 05:00:00	528	48
+666	1990-09-18 11:00:00	36	534
+667	1990-09-18 14:00:00	500	632
+668	1990-09-19 00:00:00	668	637
+669	1990-09-19 09:00:00	628	518
+670	1990-09-19 10:00:00	415	65
+671	1990-09-19 17:00:00	381	688
+672	1990-09-19 20:00:00	50	153
+673	1990-09-19 23:00:00	261	405
+674	1990-09-20 00:00:00	81	333
+675	1990-09-20 02:00:00	54	663
+676	1990-09-20 17:00:00	269	284
+677	1990-09-21 07:00:00	650	446
+678	1990-09-21 11:00:00	189	750
+679	1990-09-21 22:00:00	720	433
+680	1990-09-21 23:00:00	556	239
+681	1990-09-22 18:00:00	89	741
+682	1990-09-23 01:00:00	708	412
+683	1990-09-23 08:00:00	73	638
+684	1990-09-23 10:00:00	106	148
+685	1990-09-23 19:00:00	657	493
+686	1990-09-23 20:00:00	535	688
+687	1990-09-24 05:00:00	327	702
+688	1990-09-24 09:00:00	510	435
+689	1990-09-24 14:00:00	520	194
+690	1990-09-24 16:00:00	308	457
+691	1990-09-24 18:00:00	276	686
+692	1990-09-25 06:00:00	445	54
+693	1990-09-25 10:00:00	24	339
+694	1990-09-25 17:00:00	32	555
+695	1990-09-25 18:00:00	606	483
+696	1990-09-25 21:00:00	297	728
+697	1990-09-25 23:00:00	518	495
+698	1990-09-26 13:00:00	429	29
+699	1990-09-26 20:00:00	445	277
+700	1990-09-27 06:00:00	171	718
+701	1990-09-27 07:00:00	646	671
+702	1990-09-27 09:00:00	565	297
+703	1990-09-27 12:00:00	1	318
+704	1990-09-28 00:00:00	152	72
+705	1990-09-28 04:00:00	71	533
+706	1990-09-28 07:00:00	361	772
+707	1990-09-28 20:00:00	509	155
+708	1990-10-01 03:00:00	12	3
+709	1990-10-01 08:00:00	726	531
+710	1990-10-01 10:00:00	103	348
+711	1990-10-02 17:00:00	356	53
+712	1990-10-02 19:00:00	460	608
+713	1990-10-02 20:00:00	240	467
+714	1990-10-02 21:00:00	246	342
+715	1990-10-02 22:00:00	85	391
+716	1990-10-03 07:00:00	583	136
+717	1990-10-03 08:00:00	498	495
+718	1990-10-03 17:00:00	704	567
+719	1990-10-03 21:00:00	311	401
+720	1990-10-04 03:00:00	334	311
+721	1990-10-04 04:00:00	774	674
+722	1990-10-04 10:00:00	328	249
+723	1990-10-04 11:00:00	64	183
+724	1990-10-05 15:00:00	216	500
+725	1990-10-06 14:00:00	66	615
+726	1990-10-06 20:00:00	149	533
+727	1990-10-07 02:00:00	475	222
+728	1990-10-07 09:00:00	692	643
+729	1990-10-07 19:00:00	564	566
+730	1990-10-08 10:00:00	203	132
+731	1990-10-09 12:00:00	114	503
+732	1990-10-09 13:00:00	108	555
+733	1990-10-09 21:00:00	398	99
+734	1990-10-09 22:00:00	325	312
+735	1990-10-10 01:00:00	59	658
+736	1990-10-10 13:00:00	780	376
+737	1990-10-10 16:00:00	302	291
+738	1990-10-10 20:00:00	664	303
+739	1990-10-11 11:00:00	357	304
+740	1990-10-11 14:00:00	287	506
+741	1990-10-11 18:00:00	173	252
+742	1990-10-11 21:00:00	371	307
+743	1990-10-11 22:00:00	615	235
+744	1990-10-12 04:00:00	136	718
+745	1990-10-12 08:00:00	690	15
+746	1990-10-12 10:00:00	269	68
+747	1990-10-12 22:00:00	404	485
+748	1990-10-13 04:00:00	291	373
+749	1990-10-13 14:00:00	390	722
+750	1990-10-13 17:00:00	580	137
+751	1990-10-14 00:00:00	432	654
+752	1990-10-14 04:00:00	417	656
+753	1990-10-14 11:00:00	690	247
+754	1990-10-14 22:00:00	180	446
+755	1990-10-14 23:00:00	453	752
+756	1990-10-15 11:00:00	272	51
+757	1990-10-15 23:00:00	738	238
+758	1990-10-16 08:00:00	172	430
+759	1990-10-17 12:00:00	544	2
+760	1990-10-17 22:00:00	681	330
+761	1990-10-17 23:00:00	460	400
+762	1990-10-18 01:00:00	711	554
+763	1990-10-18 16:00:00	268	503
+764	1990-10-19 01:00:00	516	104
+765	1990-10-19 05:00:00	187	753
+766	1990-10-20 08:00:00	579	14
+767	1990-10-20 11:00:00	731	793
+768	1990-10-20 15:00:00	469	765
+769	1990-10-20 20:00:00	365	242
+770	1990-10-20 23:00:00	551	647
+771	1990-10-21 15:00:00	228	545
+772	1990-10-21 18:00:00	414	756
+773	1990-10-21 19:00:00	516	482
+774	1990-10-22 05:00:00	305	320
+775	1990-10-23 06:00:00	1	640
+776	1990-10-23 21:00:00	10	493
+777	1990-10-24 08:00:00	318	318
+778	1990-10-24 09:00:00	321	140
+779	1990-10-24 11:00:00	762	636
+780	1990-10-25 09:00:00	280	135
+781	1990-10-25 13:00:00	13	458
+782	1990-10-25 17:00:00	130	770
+783	1990-10-25 20:00:00	346	148
+784	1990-10-25 21:00:00	576	44
+785	1990-10-26 02:00:00	411	95
+786	1990-10-26 03:00:00	571	106
+787	1990-10-26 06:00:00	598	128
+788	1990-10-26 08:00:00	88	344
+789	1990-10-26 10:00:00	252	85
+790	1990-10-27 01:00:00	192	108
+791	1990-10-27 07:00:00	831	456
+792	1990-10-27 11:00:00	765	441
+793	1990-10-27 19:00:00	130	29
+794	1990-10-27 21:00:00	513	420
+795	1990-10-27 23:00:00	253	376
+796	1990-10-28 00:00:00	264	399
+797	1990-10-28 05:00:00	133	242
+798	1990-10-28 22:00:00	343	515
+799	1990-11-01 13:00:00	554	640
+800	1990-11-01 19:00:00	271	308
+801	1990-11-02 00:00:00	322	708
+802	1990-11-02 04:00:00	269	44
+803	1990-11-02 05:00:00	154	577
+804	1990-11-02 13:00:00	347	53
+805	1990-11-02 22:00:00	810	379
+806	1990-11-03 00:00:00	74	76
+807	1990-11-03 05:00:00	271	399
+808	1990-11-03 07:00:00	400	746
+809	1990-11-03 17:00:00	289	14
+810	1990-11-03 22:00:00	196	162
+811	1990-11-04 04:00:00	90	102
+812	1990-11-04 15:00:00	501	365
+813	1990-11-05 05:00:00	505	285
+814	1990-11-05 15:00:00	565	424
+815	1990-11-06 02:00:00	647	315
+816	1990-11-07 12:00:00	624	53
+817	1990-11-08 05:00:00	840	358
+818	1990-11-08 10:00:00	285	438
+819	1990-11-08 15:00:00	727	737
+820	1990-11-08 16:00:00	463	219
+821	1990-11-10 02:00:00	597	573
+822	1990-11-10 21:00:00	384	507
+823	1990-11-10 23:00:00	730	196
+824	1990-11-11 05:00:00	37	2
+825	1990-11-11 07:00:00	43	516
+826	1990-11-11 11:00:00	504	880
+827	1990-11-12 01:00:00	126	367
+828	1990-11-12 02:00:00	643	260
+829	1990-11-12 06:00:00	856	78
+830	1990-11-12 17:00:00	243	450
+831	1990-11-13 02:00:00	97	851
+832	1990-11-13 17:00:00	726	508
+833	1990-11-14 00:00:00	225	320
+834	1990-11-14 03:00:00	295	42
+835	1990-11-14 11:00:00	280	664
+836	1990-11-15 06:00:00	829	601
+837	1990-11-15 12:00:00	23	654
+838	1990-11-16 02:00:00	353	167
+839	1990-11-17 00:00:00	720	648
+840	1990-11-17 01:00:00	769	489
+841	1990-11-18 00:00:00	274	99
+842	1990-11-18 01:00:00	229	686
+843	1990-11-18 07:00:00	250	244
+844	1990-11-19 15:00:00	44	458
+845	1990-11-19 17:00:00	800	827
+846	1990-11-19 18:00:00	810	433
+847	1990-11-20 16:00:00	604	714
+848	1990-11-20 18:00:00	323	39
+849	1990-11-20 20:00:00	206	891
+850	1990-11-20 22:00:00	193	17
+851	1990-11-21 02:00:00	18	767
+852	1990-11-21 11:00:00	755	263
+853	1990-11-21 19:00:00	384	889
+854	1990-11-23 03:00:00	646	51
+855	1990-11-23 08:00:00	285	587
+856	1990-11-23 12:00:00	712	485
+857	1990-11-24 00:00:00	560	137
+858	1990-11-24 13:00:00	841	437
+859	1990-11-24 14:00:00	384	737
+860	1990-11-24 20:00:00	161	446
+861	1990-11-25 04:00:00	258	315
+862	1990-11-25 06:00:00	667	466
+863	1990-11-25 11:00:00	735	773
+864	1990-11-25 17:00:00	793	819
+865	1990-11-25 18:00:00	915	5
+866	1990-11-26 00:00:00	305	631
+867	1990-11-26 06:00:00	560	716
+868	1990-11-26 10:00:00	782	451
+869	1990-11-26 12:00:00	695	715
+870	1990-11-26 20:00:00	377	383
+871	1990-11-27 00:00:00	579	351
+872	1990-11-27 11:00:00	394	833
+873	1990-11-27 15:00:00	600	198
+874	1990-11-27 20:00:00	52	53
+875	1990-11-28 00:00:00	482	640
+876	1990-11-28 01:00:00	492	573
+877	1990-11-28 11:00:00	681	919
+878	1990-11-28 21:00:00	852	864
+879	1990-11-29 00:00:00	743	725
+880	1990-12-01 18:00:00	221	876
+881	1990-12-02 00:00:00	612	884
+882	1990-12-02 10:00:00	405	938
+883	1990-12-02 11:00:00	723	845
+884	1990-12-02 13:00:00	574	824
+885	1990-12-03 06:00:00	47	701
+886	1990-12-03 23:00:00	682	66
+887	1990-12-04 02:00:00	155	133
+888	1990-12-04 22:00:00	516	101
+889	1990-12-05 11:00:00	595	31
+890	1990-12-05 18:00:00	840	951
+891	1990-12-05 20:00:00	31	138
+892	1990-12-06 08:00:00	939	251
+893	1990-12-06 18:00:00	316	116
+894	1990-12-06 21:00:00	837	318
+895	1990-12-06 23:00:00	124	679
+896	1990-12-07 03:00:00	705	815
+897	1990-12-07 05:00:00	639	410
+898	1990-12-07 16:00:00	811	462
+899	1990-12-07 18:00:00	396	838
+900	1990-12-07 21:00:00	636	493
+901	1990-12-08 15:00:00	76	900
+902	1990-12-08 23:00:00	474	424
+903	1990-12-09 09:00:00	472	561
+904	1990-12-09 12:00:00	113	65
+905	1990-12-09 14:00:00	153	669
+906	1990-12-10 00:00:00	956	563
+907	1990-12-10 04:00:00	675	95
+908	1990-12-10 05:00:00	606	49
+909	1990-12-10 06:00:00	508	459
+910	1990-12-10 07:00:00	438	945
+911	1990-12-10 09:00:00	332	836
+912	1990-12-10 20:00:00	931	863
+913	1990-12-10 21:00:00	499	421
+914	1990-12-11 03:00:00	356	620
+915	1990-12-11 04:00:00	172	482
+916	1990-12-11 07:00:00	393	505
+917	1990-12-11 16:00:00	215	609
+918	1990-12-11 18:00:00	201	715
+919	1990-12-12 11:00:00	721	266
+920	1990-12-12 14:00:00	87	708
+921	1990-12-12 19:00:00	732	71
+922	1990-12-12 21:00:00	816	613
+923	1990-12-13 12:00:00	877	729
+924	1990-12-13 23:00:00	898	374
+925	1990-12-14 04:00:00	508	748
+926	1990-12-14 12:00:00	820	412
+927	1990-12-14 21:00:00	261	562
+928	1990-12-14 22:00:00	699	390
+929	1990-12-15 14:00:00	26	111
+930	1990-12-15 16:00:00	131	319
+931	1990-12-16 04:00:00	697	62
+932	1990-12-16 13:00:00	554	978
+933	1990-12-16 19:00:00	21	965
+934	1990-12-17 02:00:00	555	777
+935	1990-12-17 05:00:00	874	668
+936	1990-12-17 07:00:00	568	609
+937	1990-12-17 09:00:00	690	348
+938	1990-12-17 12:00:00	749	685
+939	1990-12-17 13:00:00	780	550
+940	1990-12-18 02:00:00	127	954
+941	1990-12-18 18:00:00	759	602
+942	1990-12-18 19:00:00	960	584
+943	1990-12-18 23:00:00	1	857
+944	1990-12-19 22:00:00	410	95
+945	1990-12-21 04:00:00	634	559
+946	1990-12-21 09:00:00	472	703
+947	1990-12-22 06:00:00	750	108
+948	1990-12-22 14:00:00	435	69
+949	1990-12-22 20:00:00	61	653
+950	1990-12-22 21:00:00	121	753
+951	1990-12-22 23:00:00	442	57
+952	1990-12-23 01:00:00	706	355
+953	1990-12-23 02:00:00	996	594
+954	1990-12-23 12:00:00	426	912
+955	1990-12-23 15:00:00	802	678
+956	1990-12-23 18:00:00	351	622
+957	1990-12-23 20:00:00	987	868
+958	1990-12-24 11:00:00	566	894
+959	1990-12-24 14:00:00	199	998
+960	1990-12-24 23:00:00	677	550
+961	1990-12-25 16:00:00	508	147
+962	1990-12-25 21:00:00	563	1009
+963	1990-12-25 23:00:00	909	575
+964	1990-12-26 01:00:00	506	691
+965	1990-12-26 08:00:00	200	628
+966	1990-12-26 09:00:00	954	872
+967	1990-12-26 16:00:00	203	366
+968	1990-12-27 06:00:00	29	444
+969	1990-12-27 23:00:00	527	12
+970	1990-12-28 03:00:00	808	658
+971	1990-12-28 08:00:00	434	802
+972	1990-12-28 09:00:00	245	502
+973	1990-12-28 11:00:00	372	856
+974	1991-01-01 03:00:00	273	351
+975	1991-01-01 07:00:00	570	249
+976	1991-01-01 19:00:00	923	569
+977	1991-01-01 22:00:00	328	868
+978	1991-01-02 00:00:00	325	941
+979	1991-01-02 05:00:00	644	937
+980	1991-01-02 13:00:00	528	1004
+981	1991-01-02 14:00:00	609	260
+982	1991-01-02 16:00:00	216	115
+983	1991-01-03 06:00:00	748	859
+984	1991-01-03 15:00:00	626	227
+985	1991-01-03 17:00:00	425	908
+986	1991-01-04 09:00:00	918	645
+987	1991-01-05 06:00:00	396	90
+988	1991-01-05 09:00:00	190	1028
+989	1991-01-06 02:00:00	283	152
+990	1991-01-06 16:00:00	1014	1005
+991	1991-01-06 17:00:00	216	121
+992	1991-01-07 03:00:00	529	591
+993	1991-01-07 12:00:00	759	531
+994	1991-01-07 17:00:00	215	531
+995	1991-01-07 20:00:00	47	402
+996	1991-01-07 22:00:00	465	592
+997	1991-01-07 23:00:00	1012	493
+998	1991-01-08 10:00:00	775	324
+999	1991-01-08 11:00:00	1009	369
+1000	1991-01-08 15:00:00	367	465
+1001	1991-01-08 19:00:00	138	868
+1002	1991-01-09 13:00:00	225	503
+1003	1991-01-09 19:00:00	727	563
+1004	1991-01-09 22:00:00	577	636
+1005	1991-01-10 01:00:00	944	751
+1006	1991-01-10 03:00:00	945	851
+1007	1991-01-11 05:00:00	707	941
+1008	1991-01-11 09:00:00	298	1014
+1009	1991-01-11 13:00:00	491	188
+1010	1991-01-11 20:00:00	585	633
+1011	1991-01-12 10:00:00	635	514
+1012	1991-01-12 20:00:00	831	1018
+1013	1991-01-13 01:00:00	367	692
+1014	1991-01-13 21:00:00	704	93
+1015	1991-01-14 14:00:00	717	85
+1016	1991-01-14 17:00:00	22	844
+1017	1991-01-14 18:00:00	336	380
+1018	1991-01-15 00:00:00	798	163
+1019	1991-01-15 08:00:00	145	601
+1020	1991-01-15 16:00:00	611	259
+1021	1991-01-16 02:00:00	296	756
+1022	1991-01-16 03:00:00	133	270
+1023	1991-01-16 06:00:00	264	964
+1024	1991-01-16 13:00:00	110	161
+1025	1991-01-16 15:00:00	531	386
+1026	1991-01-17 09:00:00	970	40
+1027	1991-01-17 22:00:00	171	996
+1028	1991-01-18 02:00:00	80	875
+1029	1991-01-18 04:00:00	585	487
+1030	1991-01-18 17:00:00	574	456
+1031	1991-01-18 22:00:00	936	564
+1032	1991-01-19 03:00:00	306	418
+1033	1991-01-19 04:00:00	651	667
+1034	1991-01-19 17:00:00	784	812
+1035	1991-01-19 21:00:00	348	504
+1036	1991-01-20 00:00:00	615	277
+1037	1991-01-20 02:00:00	337	716
+1038	1991-01-20 11:00:00	591	838
+1039	1991-01-20 15:00:00	599	248
+1040	1991-01-21 18:00:00	26	192
+1041	1991-01-22 08:00:00	232	948
+1042	1991-01-22 15:00:00	535	764
+1043	1991-01-24 08:00:00	745	790
+1044	1991-01-24 18:00:00	401	1
+1045	1991-01-24 19:00:00	754	103
+1046	1991-01-25 05:00:00	95	641
+1047	1991-01-25 11:00:00	499	751
+1048	1991-01-25 16:00:00	200	993
+1049	1991-01-26 18:00:00	163	332
+1050	1991-01-27 20:00:00	191	127
+1051	1991-01-27 21:00:00	271	531
+1052	1991-01-28 06:00:00	515	431
+1053	1991-01-28 10:00:00	498	1001
+1054	1991-01-28 15:00:00	725	413
+1055	1991-02-01 15:00:00	439	1099
+1056	1991-02-01 16:00:00	286	61
+1057	1991-02-01 19:00:00	626	430
+1058	1991-02-02 01:00:00	188	289
+1059	1991-02-02 03:00:00	370	293
+1060	1991-02-02 06:00:00	1004	651
+1061	1991-02-02 08:00:00	156	443
+1062	1991-02-03 10:00:00	514	363
+1063	1991-02-03 22:00:00	425	630
+1064	1991-02-04 00:00:00	718	998
+1065	1991-02-04 04:00:00	320	672
+1066	1991-02-04 07:00:00	187	321
+1067	1991-02-04 14:00:00	446	798
+1068	1991-02-04 16:00:00	452	289
+1069	1991-02-04 17:00:00	645	906
+1070	1991-02-05 13:00:00	25	946
+1071	1991-02-05 17:00:00	106	108
+1072	1991-02-07 17:00:00	748	2
+1073	1991-02-08 06:00:00	1077	599
+1074	1991-02-08 15:00:00	215	83
+1075	1991-02-08 22:00:00	227	703
+1076	1991-02-09 04:00:00	552	1027
+1077	1991-02-09 08:00:00	209	253
+1078	1991-02-09 10:00:00	186	662
+1079	1991-02-09 12:00:00	158	333
+1080	1991-02-09 20:00:00	1047	675
+1081	1991-02-10 03:00:00	1	483
+1082	1991-02-10 06:00:00	1124	931
+1083	1991-02-10 07:00:00	939	602
+1084	1991-02-11 03:00:00	589	547
+1085	1991-02-11 10:00:00	705	218
+1086	1991-02-11 13:00:00	760	890
+1087	1991-02-11 19:00:00	514	505
+1088	1991-02-11 21:00:00	874	1068
+1089	1991-02-12 06:00:00	1027	313
+1090	1991-02-12 13:00:00	307	193
+1091	1991-02-12 22:00:00	261	112
+1092	1991-02-13 06:00:00	175	675
+1093	1991-02-13 12:00:00	379	576
+1094	1991-02-13 15:00:00	45	525
+1095	1991-02-14 14:00:00	1138	293
+1096	1991-02-14 23:00:00	849	854
+1097	1991-02-15 02:00:00	476	602
+1098	1991-02-15 04:00:00	1050	618
+1099	1991-02-15 05:00:00	63	254
+1100	1991-02-16 02:00:00	1134	203
+1101	1991-02-16 05:00:00	972	137
+1102	1991-02-16 07:00:00	202	563
+1103	1991-02-16 10:00:00	67	1102
+1104	1991-02-17 00:00:00	128	1094
+1105	1991-02-17 01:00:00	560	329
+1106	1991-02-17 02:00:00	958	1001
+1107	1991-02-17 11:00:00	179	821
+1108	1991-02-17 15:00:00	291	1052
+1109	1991-02-17 23:00:00	805	1103
+1110	1991-02-18 10:00:00	952	683
+1111	1991-02-18 13:00:00	126	126
+1112	1991-02-18 16:00:00	705	19
+1113	1991-02-18 20:00:00	525	411
+1114	1991-02-19 08:00:00	747	696
+1115	1991-02-19 13:00:00	782	716
+1116	1991-02-19 19:00:00	159	1073
+1117	1991-02-19 21:00:00	238	312
+1118	1991-02-20 02:00:00	1064	409
+1119	1991-02-20 06:00:00	509	77
+1120	1991-02-20 07:00:00	453	820
+1121	1991-02-20 10:00:00	1045	904
+1122	1991-02-21 11:00:00	404	282
+1123	1991-02-22 11:00:00	912	220
+1124	1991-02-22 12:00:00	686	424
+1125	1991-02-22 16:00:00	848	564
+1126	1991-02-23 08:00:00	827	1012
+1127	1991-02-23 22:00:00	363	576
+1128	1991-02-24 09:00:00	355	151
+1129	1991-02-24 11:00:00	1081	1122
+1130	1991-02-24 15:00:00	833	689
+1131	1991-02-25 00:00:00	899	1149
+1132	1991-02-25 17:00:00	558	657
+1133	1991-02-26 16:00:00	767	323
+1134	1991-02-27 10:00:00	614	208
+1135	1991-02-27 15:00:00	627	641
+1136	1991-02-27 19:00:00	430	280
+1137	1991-02-28 01:00:00	1169	322
+1138	1991-02-28 07:00:00	834	612
+1139	1991-03-01 01:00:00	1000	778
+1140	1991-03-01 18:00:00	661	666
+1141	1991-03-01 19:00:00	591	1050
+1142	1991-03-01 20:00:00	97	876
+1143	1991-03-01 22:00:00	1095	430
+1144	1991-03-02 00:00:00	85	86
+1145	1991-03-02 05:00:00	647	1011
+1146	1991-03-02 11:00:00	332	870
+1147	1991-03-03 01:00:00	527	73
+1148	1991-03-03 02:00:00	975	997
+1149	1991-03-03 14:00:00	773	648
+1150	1991-03-04 00:00:00	18	250
+1151	1991-03-05 03:00:00	710	533
+1152	1991-03-05 21:00:00	1039	361
+1153	1991-03-05 22:00:00	19	206
+1154	1991-03-06 01:00:00	545	850
+1155	1991-03-06 12:00:00	506	835
+1156	1991-03-06 22:00:00	148	56
+1157	1991-03-07 05:00:00	320	283
+1158	1991-03-07 07:00:00	633	648
+1159	1991-03-07 10:00:00	365	784
+1160	1991-03-07 12:00:00	214	504
+1161	1991-03-08 00:00:00	1024	1081
+1162	1991-03-08 02:00:00	297	1192
+1163	1991-03-08 12:00:00	667	537
+1164	1991-03-08 22:00:00	199	242
+1165	1991-03-08 23:00:00	665	68
+1166	1991-03-09 01:00:00	324	358
+1167	1991-03-09 22:00:00	475	476
+1168	1991-03-10 00:00:00	1016	686
+1169	1991-03-10 10:00:00	16	473
+1170	1991-03-10 15:00:00	817	1184
+1171	1991-03-10 20:00:00	1166	661
+1172	1991-03-11 02:00:00	548	742
+1173	1991-03-11 06:00:00	231	938
+1174	1991-03-11 22:00:00	1050	683
+1175	1991-03-12 11:00:00	455	1121
+1176	1991-03-12 20:00:00	127	346
+1177	1991-03-13 06:00:00	551	269
+1178	1991-03-13 07:00:00	950	716
+1179	1991-03-14 00:00:00	330	215
+1180	1991-03-14 07:00:00	904	78
+1181	1991-03-14 08:00:00	1096	767
+1182	1991-03-14 12:00:00	843	64
+1183	1991-03-14 15:00:00	263	1113
+1184	1991-03-14 17:00:00	611	858
+1185	1991-03-15 05:00:00	1163	211
+1186	1991-03-15 06:00:00	470	71
+1187	1991-03-15 13:00:00	632	25
+1188	1991-03-15 15:00:00	369	1230
+1189	1991-03-16 00:00:00	945	307
+1190	1991-03-16 14:00:00	1024	192
+1191	1991-03-17 01:00:00	652	981
+1192	1991-03-17 06:00:00	1057	894
+1193	1991-03-17 14:00:00	776	176
+1194	1991-03-17 20:00:00	674	810
+1195	1991-03-17 21:00:00	1121	824
+1196	1991-03-18 15:00:00	26	717
+1197	1991-03-18 18:00:00	1214	1178
+1198	1991-03-18 19:00:00	451	675
+1199	1991-03-18 22:00:00	95	16
+1200	1991-03-19 11:00:00	509	1155
+1201	1991-03-19 17:00:00	1075	509
+1202	1991-03-19 22:00:00	1008	835
+1203	1991-03-20 11:00:00	1040	1163
+1204	1991-03-20 13:00:00	595	533
+1205	1991-03-20 14:00:00	139	438
+1206	1991-03-21 05:00:00	516	753
+1207	1991-03-21 07:00:00	1239	1006
+1208	1991-03-21 20:00:00	520	331
+1209	1991-03-22 01:00:00	1098	216
+1210	1991-03-22 12:00:00	61	974
+1211	1991-03-22 19:00:00	526	144
+1212	1991-03-23 09:00:00	675	636
+1213	1991-03-23 10:00:00	628	775
+1214	1991-03-23 18:00:00	259	630
+1215	1991-03-24 18:00:00	1041	716
+1216	1991-03-25 22:00:00	763	817
+1217	1991-03-26 03:00:00	216	921
+1218	1991-03-26 06:00:00	716	1074
+1219	1991-03-26 09:00:00	1132	1169
+1220	1991-03-26 15:00:00	126	782
+1221	1991-03-26 21:00:00	495	1134
+1222	1991-03-26 22:00:00	966	300
+1223	1991-03-27 11:00:00	362	1174
+1224	1991-03-27 17:00:00	443	321
+1225	1991-03-27 23:00:00	479	398
+1226	1991-03-28 06:00:00	115	855
+1227	1991-03-28 13:00:00	235	575
+2455	2013-06-10 17:08:51.729666	942	35
+3683	1990-01-10 08:36:06.813496	692	424
+4911	1993-10-13 17:14:55.331408	779	789
+\.
+
+
+--
+-- Name: purchase_id_seq; Type: SEQUENCE SET; Schema: public; Owner: testuser
+--
+
+SELECT pg_catalog.setval('public.purchase_id_seq', 4911, true);
+
+
+--
+-- Name: category_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.category
+    ADD CONSTRAINT category_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: category_product_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_pkey PRIMARY KEY (category_id, product_id);
+
+
+--
+-- Name: customer_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.customer
+    ADD CONSTRAINT customer_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: product_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.product
+    ADD CONSTRAINT product_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: purchase_pkey; Type: CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: category ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.category
+   WHERE (EXISTS ( SELECT 1
+           FROM public.category
+          WHERE (category.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.category_product
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.category_product cp
+             JOIN public.category c ON ((new.category_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.category_product
+          WHERE ((category_product.product_id = new.product_id) AND (category_product.category_id = new.category_id))))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: customer ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.customer
+   WHERE (EXISTS ( SELECT 1
+           FROM public.customer
+          WHERE (customer.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: product ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.product
+   WHERE (EXISTS ( SELECT 1
+           FROM public.product
+          WHERE (product.id = new.id))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: purchase ignore_insert_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_insert_violation AS
+    ON INSERT TO public.purchase
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.purchase pu
+             JOIN public.customer c ON ((new.customer_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.purchase
+          WHERE (purchase.id = new.id)))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product ignore_update_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_update_violation AS
+    ON UPDATE TO public.category_product
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.category_product cp
+             JOIN public.category c ON ((new.category_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.category_product
+          WHERE ((category_product.product_id = new.product_id) AND (category_product.category_id = new.category_id))))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: purchase ignore_update_violation; Type: RULE; Schema: public; Owner: testuser
+--
+
+CREATE RULE ignore_update_violation AS
+    ON UPDATE TO public.purchase
+   WHERE ((NOT (EXISTS ( SELECT 1
+           FROM ((public.purchase pu
+             JOIN public.customer c ON ((new.customer_id = c.id)))
+             JOIN public.product p ON ((new.product_id = p.id)))))) OR (EXISTS ( SELECT 1
+           FROM public.purchase
+          WHERE (purchase.id = new.id)))) DO INSTEAD NOTHING;
+
+
+--
+-- Name: category_product_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.category(id);
+
+
+--
+-- Name: category_product_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.category_product
+    ADD CONSTRAINT category_product_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
+
+
+--
+-- Name: purchase_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(id);
+
+
+--
+-- Name: purchase_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: testuser
+--
+
+ALTER TABLE ONLY public.purchase
+    ADD CONSTRAINT purchase_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.product(id);
+
+
+--
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: postgres
+--
+
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA public FROM postgres;
+GRANT ALL ON SCHEMA public TO postgres;
+GRANT ALL ON SCHEMA public TO PUBLIC;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
