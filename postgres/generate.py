@@ -114,9 +114,7 @@ def insert_category_product():
     advance_time()
 
 def delete_category_product():
-    # delete only sometimes
-    if utils.get_random_number(1, 5) != 1:
-        return
+    ## Delete some pair
     found_good_pair = False
     while not found_good_pair:
         category_num_ids = utils.count_rows("category")
@@ -125,16 +123,38 @@ def delete_category_product():
         _product_id = utils.get_random_number(1, product_num_ids)
         pair = (_category_id, _product_id)
         if pair in _category_product_pairs:
-            _category_product_pairs.remove(pair)
+            #_category_product_pairs.remove(pair)
             found_good_pair = True
             break
     if not found_good_pair:
         return
     category_product_category_id = pair[0]
     category_product_product_id = pair[1]
-
+    _category_product_pairs.remove(pair)
+    #utils.execute("""update category_product set category_id = {CATEGORY_PRODUCT_CATEGORY_ID} where product_id = {CATEGORY_PRODUCT_PRODUCT_ID};""".format(
+    #    CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
     utils.execute("""delete from category_product where category_id = {CATEGORY_PRODUCT_CATEGORY_ID} and product_id = {CATEGORY_PRODUCT_PRODUCT_ID};""".format(
         CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=category_product_product_id))
+
+    ## Insert modification of the deleted key
+    found_new_pair = False
+    while not found_new_pair:
+        product_num_ids = utils.count_rows("product")
+        _product_id = utils.get_random_number(1, product_num_ids)
+        new_pair = (category_product_category_id, _product_id)
+        if new_pair not in _category_product_pairs:
+            #_category_product_pairs.remove(pair)
+            found_new_pair = True
+            break
+    if not found_new_pair:
+        return
+
+    new_category_product_product_id = new_pair[1]
+    _category_product_pairs.append(new_pair)
+
+    utils.execute("""INSERT INTO category_product (category_id, product_id) VALUES ({CATEGORY_PRODUCT_CATEGORY_ID}, {CATEGORY_PRODUCT_PRODUCT_ID});""".format(
+        CATEGORY_PRODUCT_CATEGORY_ID=category_product_category_id, CATEGORY_PRODUCT_PRODUCT_ID=new_category_product_product_id))
+
     advance_time()
 
 
@@ -216,26 +236,35 @@ def create_testdb_history():
 
     ## list of database modification functions
     functions = [insert_category, update_category,
-                insert_product, update_product,
-                insert_customer, update_customer,
-                insert_category_product,
-                insert_purchase]
+                 insert_product, update_product,
+                 insert_customer, update_customer,
+                 insert_category_product,
+                 insert_purchase]
+    functions_history = []
     if IS_HISTORY:
-        functions.append(update_purchase)
-        functions.append(delete_category_product)
+        functions_history.append(update_purchase)
+        functions_history.append(delete_category_product)
 
     ## initial inserts
     def _init():
         insert_category()
         insert_product()
         insert_customer()
+        insert_category_product()
+        insert_purchase()
     for _ in range(20):
         _init()
 
     ## db life simulation
-    for _ in range(DB_CHANGES):
+    for i in range(DB_CHANGES):
         fcn = functions[utils.get_random_number(0, len(functions)-1)]
         print(fcn.__name__)
         fcn()
+        if IS_HISTORY:
+            if utils.get_random_number(1, 10) == 1:
+                fcn_history = functions_history[utils.get_random_number(0, len(functions_history)-1)]
+                print(fcn_history.__name__)
+                fcn_history()
+
 
 create_testdb_history()
